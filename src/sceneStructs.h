@@ -15,6 +15,22 @@ enum GeomType
     CUBE
 };
 
+// only for 4bit, stored in last 4 bit while sorting
+// note that EMITTING and NONE_MAT(miss) will be tagged to be terminate
+// so after sorting they should be at the right, and they should have a bit completely different from others in order to get remaining numbers 
+enum MatType
+{
+    DIFFUSE,
+    SPECULAR,
+    PBR,
+    // below are materials which are to "terminate" after this pass
+    TER_DIFFUSE = 8,
+    TER_SPECULAR,
+    TER_PBR,
+    LIGHT,
+    NONE_MAT
+};
+
 struct Ray
 {
     glm::vec3 origin;
@@ -35,15 +51,12 @@ struct Geom
 
 struct Material
 {
+    MatType type;
     glm::vec3 color;
-    struct
-    {
-        float exponent;
-        glm::vec3 color;
-    } specular;
-    float hasReflective;
-    float hasRefractive;
-    float indexOfRefraction;
+    float transmission;
+    float ior;
+    float roughness;
+    float metallic;
     float emittance;
 };
 
@@ -72,8 +85,10 @@ struct PathSegment
 {
     Ray ray;
     glm::vec3 color;
+    glm::vec3 throughput;
     int pixelIndex;
     int remainingBounces;
+    float pdf;
 };
 
 // Use with a corresponding PathSegment to do:

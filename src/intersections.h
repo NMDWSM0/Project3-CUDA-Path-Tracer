@@ -5,6 +5,8 @@
 #include <glm/glm.hpp>
 #include <glm/gtx/intersect.hpp>
 
+#include <device_launch_parameters.h>
+#include <device_functions.h>
 
 /**
  * Handy-dandy hash function that provides seeds for random number generation.

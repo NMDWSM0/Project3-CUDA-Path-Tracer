@@ -42,22 +42,27 @@ void Scene::loadFromJSON(const std::string& jsonName)
         const auto& name = item.key();
         const auto& p = item.value();
         Material newMaterial{};
-        // TODO: handle materials loading differently
+        // handle materials loading
         if (p["TYPE"] == "Diffuse")
         {
             const auto& col = p["RGB"];
             newMaterial.color = glm::vec3(col[0], col[1], col[2]);
+            newMaterial.type = DIFFUSE;
         }
-        else if (p["TYPE"] == "Emitting")
+        else if (p["TYPE"] == "Light")
         {
             const auto& col = p["RGB"];
             newMaterial.color = glm::vec3(col[0], col[1], col[2]);
             newMaterial.emittance = p["EMITTANCE"];
+            newMaterial.type = LIGHT;
         }
         else if (p["TYPE"] == "Specular")
         {
             const auto& col = p["RGB"];
             newMaterial.color = glm::vec3(col[0], col[1], col[2]);
+            newMaterial.ior = p.value("IOR", 1.5f);
+            newMaterial.transmission = p.value("TRANSMISSION", 0.f);
+            newMaterial.type = SPECULAR;
         }
         MatNameToID[name] = materials.size();
         materials.emplace_back(newMaterial);
@@ -88,12 +93,19 @@ void Scene::loadFromJSON(const std::string& jsonName)
         newGeom.invTranspose = glm::inverseTranspose(newGeom.transform);
 
         geoms.push_back(newGeom);
+        if (materials[newGeom.materialid].type == LIGHT) {
+            lightgeoms.push_back(newGeom);
+        }
     }
     const auto& cameraData = data["Camera"];
     Camera& camera = state.camera;
     RenderState& state = this->state;
     camera.resolution.x = cameraData["RES"][0];
     camera.resolution.y = cameraData["RES"][1];
+    // maximum resolution: 15360*8640
+    if (camera.resolution.x * camera.resolution.y > (1 << 27)) {
+        std::cerr << "Maximum Resolution cannot exceed 15360*8640" << '\n';
+    }
     float fovy = cameraData["FOVY"];
     state.iterations = cameraData["ITERATIONS"];
     state.traceDepth = cameraData["DEPTH"];
@@ -106,7 +118,7 @@ void Scene::loadFromJSON(const std::string& jsonName)
     camera.up = glm::vec3(up[0], up[1], up[2]);
 
     //calculate fov based on resolution
-    float yscaled = tan(fovy * (PI / 180));
+    float yscaled = tan(fovy * 0.5f * (PI / 180));
     float xscaled = (yscaled * camera.resolution.x) / camera.resolution.y;
     float fovx = (atan(xscaled) * 180) / PI;
     camera.fov = glm::vec2(fovx, fovy);
