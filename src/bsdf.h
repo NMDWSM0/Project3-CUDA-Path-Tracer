@@ -1,8 +1,9 @@
 #pragma once
 
 #include <glm/glm.hpp>
-#include <cuda.h>
-#include <device_launch_parameters.h>
-#include <device_functions.h>
+
+#include "sceneStructs.h"
+
+__host__ __device__ float powerHeuristic(float a, float b);
 
 __host__ __device__ float dielectricFresnel(float cosThetaI, float eta);

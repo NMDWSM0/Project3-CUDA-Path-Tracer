@@ -1,113 +1,310 @@
 #include "intersections.h"
+#include "utilities.h"
 
-__host__ __device__ float boxIntersectionTest(
-    Geom box,
-    Ray r,
-    glm::vec3 &intersectionPoint,
-    glm::vec3 &normal,
-    bool &outside)
+__host__ __device__ float AABBIntersect(glm::vec3 minCorner, glm::vec3 maxCorner, const Ray& r)
 {
-    Ray q;
-    q.origin    =                multiplyMV(box.inverseTransform, glm::vec4(r.origin   , 1.0f));
-    q.direction = glm::normalize(multiplyMV(box.inverseTransform, glm::vec4(r.direction, 0.0f)));
+    glm::vec3 invDir = glm::vec3(1.0) / r.direction;
 
-    float tmin = -1e38f;
-    float tmax = 1e38f;
-    glm::vec3 tmin_n;
-    glm::vec3 tmax_n;
-    for (int xyz = 0; xyz < 3; ++xyz)
-    {
-        float qdxyz = q.direction[xyz];
-        /*if (glm::abs(qdxyz) > 0.00001f)*/
-        {
-            float t1 = (-0.5f - q.origin[xyz]) / qdxyz;
-            float t2 = (+0.5f - q.origin[xyz]) / qdxyz;
-            float ta = glm::min(t1, t2);
-            float tb = glm::max(t1, t2);
-            glm::vec3 n;
-            n[xyz] = t2 < t1 ? +1 : -1;
-            if (ta > 0 && ta > tmin)
-            {
-                tmin = ta;
-                tmin_n = n;
-            }
-            if (tb < tmax)
-            {
-                tmax = tb;
-                tmax_n = n;
-            }
-        }
-    }
+    glm::vec3 f = (maxCorner - r.origin) * invDir;
+    glm::vec3 n = (minCorner - r.origin) * invDir;
 
-    if (tmax >= tmin && tmax > 0)
-    {
-        outside = true;
-        if (tmin <= 0)
-        {
-            tmin = tmax;
-            tmin_n = tmax_n;
-            outside = false;
-        }
-        intersectionPoint = multiplyMV(box.transform, glm::vec4(getPointOnRay(q, tmin), 1.0f));
-        normal = glm::normalize(multiplyMV(box.invTranspose, glm::vec4(tmin_n, 0.0f)));
-        return glm::length(r.origin - intersectionPoint);
-    }
+    glm::vec3 tmax = max(f, n);
+    glm::vec3 tmin = min(f, n);
 
-    return -1;
+    float t1 = glm::min(tmax.x, glm::min(tmax.y, tmax.z));
+    float t0 = glm::max(tmin.x, glm::max(tmin.y, tmin.z));
+
+    return (t1 >= t0) ? (t0 > 0.f ? t0 : t1) : -1.0;
 }
 
-__host__ __device__ float sphereIntersectionTest(
-    Geom sphere,
-    Ray r,
-    glm::vec3 &intersectionPoint,
-    glm::vec3 &normal,
-    bool &outside)
+__host__ __device__ float SphereIntersect(float rad, glm::vec3 pos, const Ray& r)
 {
-    float radius = .5;
+    glm::vec3 op = pos - r.origin;
+    float b = glm::dot(op, r.direction);
+    float det = b * b - glm::dot(op, op) + rad * rad;
+    if (det < 0.0)
+        return INFINITY;
 
-    glm::vec3 ro = multiplyMV(sphere.inverseTransform, glm::vec4(r.origin, 1.0f));
-    glm::vec3 rd = glm::normalize(multiplyMV(sphere.inverseTransform, glm::vec4(r.direction, 0.0f)));
+    det = sqrt(det);
+    float t1 = b - det;
+    if (t1 > 0.001)
+        return t1;
 
-    Ray rt;
-    rt.origin = ro;
-    rt.direction = rd;
+    float t2 = b + det;
+    if (t2 > 0.001)
+        return t2;
 
-    float vDotDirection = glm::dot(rt.origin, rt.direction);
-    float radicand = vDotDirection * vDotDirection - (glm::dot(rt.origin, rt.origin) - powf(radius, 2));
-    if (radicand < 0)
-    {
-        return -1;
+    return INFINITY;
+}
+
+__host__ __device__ float RectIntersect(glm::vec3 pos, glm::vec3 u, glm::vec3 v, glm::vec4 plane, const Ray& r)
+{
+    glm::vec3 n = glm::vec3(plane);
+    float dt = glm::dot(r.direction, n);
+    float t = (plane.w - glm::dot(n, r.origin)) / dt;
+
+    if (t > EPSILON) {
+        glm::vec3 p = r.origin + r.direction * t;
+        glm::vec3 vi = p - pos;
+        float a1 = glm::dot(u, vi);
+        if (a1 >= 0.0 && a1 <= 1.0) {
+            float a2 = glm::dot(v, vi);
+            if (a2 >= 0.0 && a2 <= 1.0)
+                return t;
+        }
+    }
+    return INFINITY;
+}
+
+__host__ __device__ float TriangleIntersect(glm::vec3 v0, glm::vec3 v1, glm::vec3 v2, const Ray& r, glm::vec3& bary)
+{
+    glm::vec3 e0 = v1 - v0;
+    glm::vec3 e1 = v2 - v0;
+    glm::vec3 pv = glm::cross(r.direction, e1);
+    float det = glm::dot(e0, pv);
+
+    if (glm::abs(det) == 0.f) {
+        return INFINITY;
     }
 
-    float squareRoot = sqrt(radicand);
-    float firstTerm = -vDotDirection;
-    float t1 = firstTerm + squareRoot;
-    float t2 = firstTerm - squareRoot;
+    glm::vec3 tv = r.origin - v0;
+    glm::vec3 qv = glm::cross(tv, e0);
 
-    float t = 0;
-    if (t1 < 0 && t2 < 0)
-    {
-        return -1;
+    bary.x = glm::dot(tv, pv) / det;
+    bary.y = glm::dot(r.direction, qv) / det;
+    bary.z = 1.0 - bary.x - bary.y;
+    float t = glm::dot(e1, qv) / det;
+    
+    if (bary.x >= 0 && bary.y >= 0 && bary.z >= 0 && t >= 0) {
+        return t;
     }
-    else if (t1 > 0 && t2 > 0)
-    {
-        t = min(t1, t2);
-        outside = true;
+    else {
+        return INFINITY;
     }
-    else
-    {
-        t = max(t1, t2);
-        outside = false;
+}
+
+
+
+__host__ __device__ bool getAnyHit(
+    const Ray& r,
+    Geom* geoms,
+    int geoms_size,
+    LightGeom* lightgeoms,
+    int lightgeoms_size,
+    glm::vec3* vertexPos,
+    float maxt)
+{
+    // first check light source
+    for (int i = 0; i < lightgeoms_size; ++i) {
+        LightGeom& light = lightgeoms[i];
+        LightType type = light.type;
+        glm::vec3 u = light.u;
+        // face light
+        if (type == RECTLIGHT) {
+            glm::vec3 v = light.v;
+            glm::vec3 normal = glm::normalize(glm::cross(u, v));
+            //if (dot(normal, r.direction) > 0.f) // if we hit a light from back
+            //    continue;
+            u *= 1.0f / glm::dot(u, u);
+            v *= 1.0f / glm::dot(v, v);
+            glm::vec3 position = light.position;
+            glm::vec4 plane = glm::vec4(normal, glm::dot(normal, position));
+
+            float distance = RectIntersect(position, u, v, plane, r);
+            if (distance > 0 && distance < maxt) {
+                return true;
+            }
+        }
+        // sphere light
+        if (type == SPHERELIGHT) {
+            glm::vec3 position = light.position;
+            float& radius = u.x;
+            float distance = SphereIntersect(radius, position, r);
+            if (distance > 0 && distance < maxt) {
+                return true;
+            }
+        }
     }
 
-    glm::vec3 objspaceIntersection = getPointOnRay(rt, t);
-
-    intersectionPoint = multiplyMV(sphere.transform, glm::vec4(objspaceIntersection, 1.f));
-    normal = glm::normalize(multiplyMV(sphere.invTranspose, glm::vec4(objspaceIntersection, 0.f)));
-    if (!outside)
+    // check meshes, if distance smaller than light source than override it
+    // TODO: Use BVH instead
+    glm::vec3 barycentricParameters;
+    glm::ivec3 vertIds;
+    for (int i = 0; i < geoms_size; i++)
     {
-        normal = -normal;
+        Geom geom = geoms[i];
+        float distance = -1;
+        if (geom.type == TRIANGLE)
+        {
+            vertIds = geom.vertIds;
+            distance = TriangleIntersect(vertexPos[vertIds[0]], vertexPos[vertIds[1]], vertexPos[vertIds[2]], r, barycentricParameters);
+        }
+        else if (geom.type == SPHERE)
+        {
+            distance = SphereIntersect(geom.radius, geom.center, r);
+        }
+
+        // Compute the minimum t from the intersection tests to determine what
+        // scene geometry object was hit first.
+        if (distance > 0.0f && distance < maxt)
+        {
+            return true;
+        }
     }
 
-    return glm::length(r.origin - intersectionPoint);
+    // No intersections before maxt
+    return false;
+}
+
+
+__host__ __device__ bool getClosestHit(
+    const Ray& r,
+    Geom* geoms,
+    int geoms_size,
+    LightGeom* lightgeoms,
+    int lightgeoms_size,
+    glm::vec3* vertexPos,
+    glm::vec3* vertexNor,
+    glm::vec2* vertexUV,
+    ShadeableIntersection& intersection) 
+{
+    float t = INFINITY;
+
+    // first check light source
+    for (int i = 0; i < lightgeoms_size; ++i) {
+        LightGeom& light = lightgeoms[i];
+        LightType type = light.type;
+        glm::vec3 u = light.u;
+        // face light
+        if (type == RECTLIGHT) {
+            glm::vec3 v = light.v;
+            glm::vec3 uvcross = glm::cross(u, v);
+            glm::vec3 normal = glm::normalize(uvcross);
+            //if (dot(normal, r.direction) > 0.f) // if we hit a light from back
+            //    continue;
+            u *= 1.0f / glm::dot(u, u);
+            v *= 1.0f / glm::dot(v, v);
+            glm::vec3 position = light.position;
+            glm::vec4 plane = glm::vec4(normal, glm::dot(normal, position));
+
+            float distance = RectIntersect(position, u, v, plane, r);
+            if (distance < t) {
+                t = distance;
+                float cosTheta = dot(-r.direction, normal);
+                intersection.pdf_Li = (t * t) / (glm::length(uvcross) * cosTheta);
+                intersection.lightEmission = light.emission;
+                intersection.materialId = -1;
+            }
+        }
+        // sphere light
+        if (type == SPHERELIGHT) {
+            glm::vec3 position = light.position;
+            float& radius = u.x;
+            float distance = SphereIntersect(radius, position, r);
+            if (distance < t) {
+                t = distance;
+                glm::vec3 hitPoint = r.origin + t * r.direction;
+                float cosTheta = glm::dot(-r.direction, glm::normalize(hitPoint - position));
+                intersection.pdf_Li = (t * t) / (PI * radius * radius * cosTheta * 0.5);
+                intersection.lightEmission = light.emission;
+                intersection.materialId = -1;
+            }
+        }
+    }
+
+    // check meshes, if distance smaller than light source than override it
+    // TODO: Use BVH instead
+    int hit_geom_index = -1;
+    int materialID = -1;
+    GeomType hitType;
+    glm::vec3 barycentricParameters;
+    glm::ivec3 vertIds;
+    glm::vec3 vp0, vp1, vp2, center;
+    for (int i = 0; i < geoms_size; i++)
+    {
+        Geom geom = geoms[i];
+        float distance = -1;
+        glm::vec3 temp_bary;
+        glm::ivec3 temp_vertIds;
+        glm::vec3 temp_vp0, temp_vp1, temp_vp2, temp_center;
+        if (geom.type == TRIANGLE)
+        {
+            temp_vertIds = geom.vertIds;
+            temp_vp0 = vertexPos[temp_vertIds[0]];
+            temp_vp1 = vertexPos[temp_vertIds[1]];
+            temp_vp2 = vertexPos[temp_vertIds[2]];
+            distance = TriangleIntersect(temp_vp0, temp_vp1, temp_vp2, r, temp_bary);
+        }
+        else if (geom.type == SPHERE)
+        {
+            temp_center = geom.center;
+            distance = SphereIntersect(geom.radius, temp_center, r);
+        }
+
+        // Compute the minimum t from the intersection tests to determine what
+        // scene geometry object was hit first.
+        if (distance > 0.0f && distance < t)
+        {
+            t = distance;
+            hit_geom_index = i;
+            materialID = geom.materialid;
+            hitType = geom.type;
+            // copy some hit info
+            vertIds = temp_vertIds;
+            barycentricParameters = temp_bary;
+            vp0 = temp_vp0;
+            vp1 = temp_vp1;
+            vp2 = temp_vp2;
+            center = temp_center;
+        }
+    }
+
+    // No intersections
+    if (t == INFINITY)
+        return false;
+
+    // hit
+    intersection.t = t;
+    glm::vec3 hitPos = r.origin + r.direction * t;
+
+    // Ray hit a triangle and not a light source
+    if (hit_geom_index != -1) {
+        intersection.materialId = materialID;
+
+        if (hitType == SPHERE) {
+
+            intersection.surfaceNormal = glm::normalize(hitPos - center);
+            // no texture support
+            intersection.texCoord = glm::vec2(0.f);
+            intersection.tangent = glm::vec3(0.f);
+        }
+        else {
+            // Normals
+            glm::vec3 vn0 = vertexNor[vertIds[0]];
+            glm::vec3 vn1 = vertexNor[vertIds[1]];
+            glm::vec3 vn2 = vertexNor[vertIds[2]];
+
+            // TexCoords
+            glm::vec2 tc0 = vertexUV[vertIds[0]];
+            glm::vec2 tc1 = vertexUV[vertIds[1]];
+            glm::vec2 tc2 = vertexUV[vertIds[2]];
+
+            // Interpolate texture coords and normals using barycentric coords
+            intersection.texCoord = tc0 * barycentricParameters.x + tc1 * barycentricParameters.y + tc2 * barycentricParameters.z;
+            // Interpolate normals
+            intersection.surfaceNormal = glm::normalize(vn0 * barycentricParameters.x + vn1 * barycentricParameters.y + vn2 * barycentricParameters.z);
+
+            // Calculate tangent (calculate bitangent = cross(normal, tangent) later in shading kernel)
+            glm::vec3 deltaPos1 = vp1 - vp0;
+            glm::vec3 deltaPos2 = vp2 - vp0;
+
+            glm::vec2 deltaUV1 = tc1 - tc0;
+            glm::vec2 deltaUV2 = tc2 - tc0;
+
+            float invdet = 1.0f / (deltaUV1.x * deltaUV2.y - deltaUV1.y * deltaUV2.x);
+
+            intersection.tangent = (deltaPos1 * deltaUV2.y - deltaPos2 * deltaUV1.y) * invdet;
+        }
+    }
+    return true;
 }

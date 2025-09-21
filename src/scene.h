@@ -11,7 +11,10 @@ public:
     Scene(std::string filename);
 
     std::vector<Geom> geoms;
-    std::vector<Geom> lightgeoms;
+    std::vector<LightGeom> lightgeoms;
+    std::vector<glm::vec3> vertPos;
+    std::vector<glm::vec3> vertNor;
+    std::vector<glm::vec2> vertUV;
     std::vector<Material> materials;
     RenderState state;
 };

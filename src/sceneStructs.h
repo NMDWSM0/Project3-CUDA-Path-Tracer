@@ -12,7 +12,14 @@
 enum GeomType
 {
     SPHERE,
-    CUBE
+    TRIANGLE
+};
+
+enum LightType
+{
+    SPHERELIGHT,
+    RECTLIGHT,
+    DIRECTIONALLIGHT
 };
 
 // only for 4bit, stored in last 4 bit while sorting
@@ -22,11 +29,11 @@ enum MatType
 {
     DIFFUSE,
     SPECULAR,
-    PBR,
+    DISNEY,
     // below are materials which are to "terminate" after this pass
     TER_DIFFUSE = 8,
     TER_SPECULAR,
-    TER_PBR,
+    TER_DISNEY,
     LIGHT,
     NONE_MAT
 };
@@ -35,18 +42,55 @@ struct Ray
 {
     glm::vec3 origin;
     glm::vec3 direction;
+
+    __host__ __device__ Ray(glm::vec3 ori, glm::vec3 dir) : origin(ori), direction(dir) {}
+
+    __host__ __device__ Ray(const Ray& other) {
+        std::memcpy(this, &other, sizeof(Ray));
+    }
+
+    __host__ __device__ Ray& operator=(const Ray& other) {
+        if (this != &other) {
+            std::memcpy(this, &other, sizeof(Ray));
+        }
+        return *this;
+    }
 };
 
 struct Geom
 {
-    enum GeomType type;
+    GeomType type;
     int materialid;
-    glm::vec3 translation;
-    glm::vec3 rotation;
-    glm::vec3 scale;
-    glm::mat4 transform;
-    glm::mat4 inverseTransform;
-    glm::mat4 invTranspose;
+    union {
+        glm::vec3 center;
+        glm::ivec3 vertIds;
+    };
+    float radius;
+
+    __host__ __device__ Geom(GeomType type) : type(type) {};
+
+    __host__ __device__ Geom(const Geom& other) {
+        std::memcpy(this, &other, sizeof(Geom));
+    }
+
+    __host__ __device__ Geom& operator=(const Geom& other) {
+        if (this != &other) {
+            std::memcpy(this, &other, sizeof(Geom));
+        }
+        return *this;
+    }
+};
+
+struct LightGeom
+{
+    LightType type;
+    glm::vec3 position;
+    glm::vec3 emission;
+    glm::vec3 u;
+    glm::vec3 v;
+    float radius;
+
+    __host__ __device__ LightGeom(LightType type) : type(type) {}
 };
 
 struct Material
@@ -58,6 +102,19 @@ struct Material
     float roughness;
     float metallic;
     float emittance;
+
+    __host__ __device__ Material() = default;
+
+    __host__ __device__ Material(const Material& other) {
+        std::memcpy(this, &other, sizeof(Material));
+    }
+
+    __host__ __device__ Material& operator=(const Material& other) {
+        if (this != &other) {
+            std::memcpy(this, &other, sizeof(Material));
+        }
+        return *this;
+    }
 };
 
 struct Camera
@@ -96,7 +153,28 @@ struct PathSegment
 // 2) BSDF evaluation: generate a new ray
 struct ShadeableIntersection
 {
-  float t;
-  glm::vec3 surfaceNormal;
-  int materialId;
+    float t;
+    int materialId;
+    union {
+        glm::vec3 surfaceNormal;
+        glm::vec3 lightEmission;
+    };
+    union {
+        glm::vec2 texCoord;
+        float pdf_Li;
+    };
+    glm::vec3 tangent;
+
+    __host__ __device__ ShadeableIntersection() : t(0), materialId(-1), surfaceNormal(0.f), texCoord(0.f), tangent(0.f) {};
+
+    __host__ __device__ ShadeableIntersection(const ShadeableIntersection& other) {
+        std::memcpy(this, &other, sizeof(ShadeableIntersection));
+    }
+
+    __host__ __device__ ShadeableIntersection& operator=(const ShadeableIntersection& other) {
+        if (this != &other) {
+            std::memcpy(this, &other, sizeof(ShadeableIntersection));
+        }
+        return *this;
+    }
 };

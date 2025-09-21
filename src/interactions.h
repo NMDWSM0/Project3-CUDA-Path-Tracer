@@ -1,19 +1,11 @@
 #pragma once
 
 #include "sceneStructs.h"
+#include "bsdf.h"
 
 #include <glm/glm.hpp>
 
 #include <thrust/random.h>
-
-// CHECKITOUT
-/**
- * Computes a cosine-weighted random direction in a hemisphere.
- * Used for diffuse lighting.
- */
-__host__ __device__ glm::vec3 calculateRandomDirectionInHemisphere(
-    glm::vec3 normal, 
-    thrust::default_random_engine& rng);
 
 /**
  * Scatter a ray with some probabilities according to the material properties.
@@ -40,7 +32,36 @@ __host__ __device__ glm::vec3 calculateRandomDirectionInHemisphere(
  *
  * You may need to change the parameter list for your purposes!
  */
-__host__ __device__ void scatterRay(
+__host__ __device__ glm::vec3 Evaluate_f(
+    const PathSegment& pathSegment,
+    glm::vec3 intersect,
+    glm::vec3 normal,
+    glm::vec3 wiW,
+    const Material& m,
+    float& pdf);
+
+__host__ __device__ void Sample_f(
+    PathSegment& pathSegment,
+    glm::vec3 intersect,
+    glm::vec3 normal,
+    const Material& m,
+    thrust::default_random_engine& rng);
+
+__host__ __device__ void Sample_Li(
+    const LightGeom& light,
+    glm::vec3 scatterPos,
+    glm::vec3& lightDir,
+    glm::vec3& lightNor,
+    float& lightDist,
+    float& pdf,
+    thrust::default_random_engine& rng);
+
+__host__ __device__ void directLight(
+    Geom* geoms,
+    int geoms_size,
+    LightGeom* lightgeoms,
+    int lightgeoms_size,
+    glm::vec3* vertexPos,
     PathSegment& pathSegment,
     glm::vec3 intersect,
     glm::vec3 normal,

@@ -1,5 +1,11 @@
 #include "bsdf.h"
 
+__host__ __device__ float powerHeuristic(float a, float b) {
+    float t = a * a;
+    float w = t / (b * b + t);
+    return isnan(w) ? 0 : w;
+}
+
 __host__ __device__ float dielectricFresnel(float cosThetaI, float eta) {
     float sinThetaTSq = eta * eta * (1.0f - cosThetaI * cosThetaI);
 
