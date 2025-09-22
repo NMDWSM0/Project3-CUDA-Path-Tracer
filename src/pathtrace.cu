@@ -259,7 +259,13 @@ __global__ void computeIntersections(
 
         Ray ray = pathSegments[path_index].ray;
         ShadeableIntersection isect;
-        bool hit = getClosestHit(ray, geoms, geoms_size, lightgeoms, lightgeoms_size, vertexPos, vertexNor, vertexUV, isect);
+        bool hit;
+        if (pathSegments[path_index].remainingBounces <= 0) {
+            hit = false;
+        }
+        else {
+            hit = getClosestHit(ray, geoms, geoms_size, lightgeoms, lightgeoms_size, vertexPos, vertexNor, vertexUV, isect);
+        }
 
 #if MATERIAL_SORT
         if (!hit)

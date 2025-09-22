@@ -21,13 +21,13 @@
         "disney_white": {
             "TYPE": "Disney",
             "RGB": [0.98, 0.98, 0.98],
-            "ROUGHNESS": 0.8,
-            "METALLIC": 1.0,
+            "ROUGHNESS": 0.3,
+            "METALLIC": 0.0,
             "TRANSMISSION": 0.0,
             "IOR": 1.5,
-            "CLEARCOAT": 1.0,
+            "CLEARCOAT": 0.0,
             "CLEARCOAT_GLOSS": 1.0,
-            "SUBSURFACE": 0.0
+            "SUBSURFACE": 1.0
         }
     },
     "Camera": {
@@ -43,7 +43,7 @@
     "Lights": [
         {
             "TYPE": "rect",
-            "EMISSION": [10.0, 10.0, 10.0],
+            "EMISSION": [5.0, 5.0, 5.0],
             "POSITION": [-1.5, 9.85, -1.5],
             "EDGE1": [3.0, 0.0, 0.0],
             "EDGE2": [0.0, 0.0, 3.0]
@@ -83,7 +83,7 @@
         {
             "TYPE": "sphere",
             "MATERIAL": "disney_white",
-            "POSITION": [-1.0, 4.0, -1.0],
+            "POSITION": [-0.5, 5.0, -0.5],
             "RADIUS": 1.5
         }
     ]

@@ -97,11 +97,14 @@ struct Material
 {
     MatType type;
     glm::vec3 color;
-    float transmission;
-    float ior;
+    glm::vec3 emission;
     float roughness;
     float metallic;
-    float emittance;
+    float transmission;
+    float ior;
+    float clearcoat;
+    float coatroughness;
+    float subsurface;
 
     __host__ __device__ Material() = default;
 

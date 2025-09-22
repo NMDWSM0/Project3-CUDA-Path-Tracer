@@ -84,7 +84,88 @@ __host__ __device__ glm::vec3 uniformSampleHemisphere(
         + sin(around) * over * perpendicularDirection2;
 }
 
+__host__ __device__ glm::vec3 sampleGTR1(
+    float roughness, 
+    glm::vec3 normal, 
+    thrust::default_random_engine& rng) 
+{
+    thrust::uniform_real_distribution<float> u01(0, 1);
+    float r1 = u01(rng), r2 = u01(rng);
 
+    glm::vec3 directionNotNormal;
+    if (abs(normal.x) < SQRT_OF_ONE_THIRD)
+    {
+        directionNotNormal = glm::vec3(1, 0, 0);
+    }
+    else if (abs(normal.y) < SQRT_OF_ONE_THIRD)
+    {
+        directionNotNormal = glm::vec3(0, 1, 0);
+    }
+    else
+    {
+        directionNotNormal = glm::vec3(0, 0, 1);
+    }
+
+    // Use not-normal direction to generate two perpendicular directions
+    glm::vec3 perpendicularDirection1 =
+        glm::normalize(glm::cross(normal, directionNotNormal));
+    glm::vec3 perpendicularDirection2 =
+        glm::normalize(glm::cross(normal, perpendicularDirection1));
+
+    float a = fmax(0.001f, roughness);
+    float a2 = a * a;
+
+    float phi = r1 * TWO_PI;
+
+    float cosTheta = sqrt((1.f - pow(a2, 1.f - r2)) / (1.f - a2));
+    float sinTheta = glm::clamp(sqrt(1.f - (cosTheta * cosTheta)), 0.f, 1.f);
+
+    return cosTheta * normal
+        + cos(phi) * sinTheta * perpendicularDirection1
+        + sin(phi) * sinTheta * perpendicularDirection2;
+}
+
+__host__ __device__ glm::vec3 sampleGTR2(
+    float roughness,
+    glm::vec3 normal,
+    thrust::default_random_engine& rng) 
+{
+    thrust::uniform_real_distribution<float> u01(0, 1);
+    float r1 = u01(rng), r2 = u01(rng);
+
+    glm::vec3 directionNotNormal;
+    if (abs(normal.x) < SQRT_OF_ONE_THIRD)
+    {
+        directionNotNormal = glm::vec3(1, 0, 0);
+    }
+    else if (abs(normal.y) < SQRT_OF_ONE_THIRD)
+    {
+        directionNotNormal = glm::vec3(0, 1, 0);
+    }
+    else
+    {
+        directionNotNormal = glm::vec3(0, 0, 1);
+    }
+
+    // Use not-normal direction to generate two perpendicular directions
+    glm::vec3 perpendicularDirection1 =
+        glm::normalize(glm::cross(normal, directionNotNormal));
+    glm::vec3 perpendicularDirection2 =
+        glm::normalize(glm::cross(normal, perpendicularDirection1));
+
+    float a = fmax(0.001f, roughness);
+
+    float phi = r1 * TWO_PI;
+
+    float cosTheta = sqrt((1.f - r2) / (1.f + (a * a - 1.f) * r2));
+    float sinTheta = glm::clamp(sqrt(1.f - (cosTheta * cosTheta)), 0.f, 1.f);
+    float sinPhi = sin(phi);
+    float cosPhi = cos(phi);
+
+    return cosTheta * normal
+        + cos(phi) * sinTheta * perpendicularDirection1
+        + sin(phi) * sinTheta * perpendicularDirection2;
+}
 
 
 
@@ -122,9 +203,98 @@ __host__ __device__ glm::vec3 F_Disney(
     const Material& m,
     float& pdf)
 {
-    // TODO
-    pdf = glm::dot(wiW, normal) * INV_PI;
-    return m.color;
+    pdf = 0.f;
+    glm::vec3 bsdf(0.f);
+    glm::vec3& woW = -pathSegment.ray.direction;
+    const float NdotV = glm::dot(woW, normal);
+    const float NdotL = glm::dot(wiW, normal);
+    glm::vec3 ffnormal = NdotV > 0.f ? normal : -normal;
+    const float eta = NdotV > 0.f ? 1.f / m.ior : m.ior;
+    const float ffNdotV = glm::dot(woW, ffnormal);
+    const float ffNdotL = glm::dot(wiW, ffnormal);
+
+    glm::vec3 half;  // half vector
+    if (ffNdotL > 0.f)
+        half = glm::normalize(wiW + woW);
+    else
+        half = glm::normalize(wiW + woW * eta);
+    if (glm::dot(half, ffnormal) < 0.f)
+        half = -half;
+
+    float F0 = (1.f - eta) / (1.f + eta); 
+    F0 *= F0;
+
+    // Model weights
+    float dielectricWeight = (1.f - m.metallic) * (1.f - m.transmission);
+    float metalWeight = m.metallic;
+    float glassWeight = (1.f - m.metallic) * m.transmission;
+
+    // Lobe probabilities
+    float sWeight = fresnelSchlick(abs(NdotV));
+
+    float diffPr = dielectricWeight * luminance(m.color);
+    float dielectricPr = dielectricWeight * luminance(glm::mix(glm::vec3(F0), glm::vec3(1.f), sWeight));
+    float metalPr = metalWeight * luminance(glm::mix(m.color, glm::vec3(1.f), sWeight));
+    float glassPr = glassWeight;
+    float clearCoatPr = 0.25f * m.clearcoat;
+
+    // Normalize probabilities
+    float invTotalPr = 1.f / (diffPr + dielectricPr + metalPr + glassPr + clearCoatPr);
+    diffPr *= invTotalPr;
+    dielectricPr *= invTotalPr;
+    metalPr *= invTotalPr;
+    glassPr *= invTotalPr;
+    clearCoatPr *= invTotalPr;
+
+    bool reflect = ffNdotL * ffNdotV > 0.f;
+
+    float tmpPdf = 0.f;
+    const float VDotH = abs(glm::dot(woW, half));
+    // Diffuse
+    if (diffPr > 0.f && reflect) {
+        bsdf += evaluateDisneyDiffuse(m, woW, wiW, half, ffnormal, tmpPdf) * dielectricWeight;
+        pdf += tmpPdf * diffPr;
+    }
+
+    // Dielectric Reflection
+    if (dielectricPr > 0.f && reflect) {
+        // Normalize for interpolating based on Cspec0
+        float F = dielectricFresnel(VDotH, 1.f / m.ior);
+
+        bsdf += evaluateMicrofacetReflection(m, woW, wiW, half, ffnormal, glm::vec3(F), tmpPdf) * dielectricWeight;
+        pdf += tmpPdf * dielectricPr;
+    }
+
+    // Metallic Reflection
+    if (metalPr > 0.f && reflect) {
+        // Tinted to base color
+        glm::vec3 F = glm::mix(m.color, glm::vec3(1.f), fresnelSchlick(VDotH));
+
+        bsdf += evaluateMicrofacetReflection(m, woW, wiW, half, ffnormal, F, tmpPdf) * metalWeight;
+        pdf += tmpPdf * metalPr;
+    }
+
+    // Glass/Specular BSDF
+    if (glassPr > 0.f) {
+        // Dielectric fresnel
+        float F = dielectricFresnel(VDotH, eta);
+        if (reflect) {
+            bsdf += evaluateMicrofacetReflection(m, woW, wiW, half, ffnormal, glm::vec3(F), tmpPdf) * glassWeight;
+            pdf += tmpPdf * glassPr * F;
+        }
+        else {
+            bsdf += evaluateMicrofacetRefraction(m, eta, woW, wiW, half, ffnormal, glm::vec3(F), tmpPdf) * glassWeight;
+            pdf += tmpPdf * glassPr * (1.f - F);
+        }
+    }
+
+    // Clearcoat
+    if (clearCoatPr > 0.f && reflect) {
+        bsdf += evaluateClearcoat(m, woW, wiW, half, ffnormal, tmpPdf) * 0.25f * m.clearcoat;
+        pdf += tmpPdf * clearCoatPr;
+    }
+
+    return bsdf * abs(NdotL);  // bsdf * absdot
 }
 
 
@@ -192,17 +362,143 @@ __host__ __device__ void Sample_f_Disney(
     const Material& m,
     thrust::default_random_engine& rng)
 {
-    // TODO
-    glm::vec3 wiW = cosineSampleHemisphere(normal, rng);
+    thrust::uniform_real_distribution<float> u01(0, 1);
+    const glm::vec3& woW = -pathSegment.ray.direction;
+    const float NdotV = glm::dot(woW, normal);
+    const float eta = NdotV > 0.f ? 1.f / m.ior : m.ior;
+    glm::vec3 ffnormal = NdotV > 0.f ? normal : -normal;
 
-    //float absdot = abs(glm::dot(wiW, normal));
-    //glm::vec3 bsdf = m.color * INV_PI;
-    //float pdf = glm::dot(wiW, normal) * INV_PI;
-    //pathSegment.color *= absdot * bsdf / pdf;
+    // Sample
+    glm::vec3 wiW;
+    float F0 = (1.f - eta) / (1.f + eta);
+    F0 *= F0;
 
-    pathSegment.throughput *= m.color; // absdot * bsdf / pdf = albedo
-    pathSegment.pdf = glm::dot(wiW, normal) * INV_PI;
-    pathSegment.ray = { intersect + wiW * EPSILON, wiW };
+    // Model weights
+    float dielectricWeight = (1.f - m.metallic) * (1.f - m.transmission);
+    float metalWeight = m.metallic;
+    float glassWeight = (1.f - m.metallic) * m.transmission;
+
+    // Lobe probabilities
+    float sWeight = fresnelSchlick(abs(NdotV));
+
+    float diffPr = dielectricWeight * luminance(m.color);
+    float dielectricPr = dielectricWeight * luminance(glm::mix(glm::vec3(F0), glm::vec3(1.f), sWeight));
+    float metalPr = metalWeight * luminance(glm::mix(m.color, glm::vec3(1.f), sWeight));
+    float glassPr = glassWeight;
+    float clearCoatPr = 0.25f * m.clearcoat;
+
+    // Normalize probabilities
+    float invTotalPr = 1.f / (diffPr + dielectricPr + metalPr + glassPr + clearCoatPr);
+    diffPr *= invTotalPr;
+    dielectricPr *= invTotalPr;
+    metalPr *= invTotalPr;
+    glassPr *= invTotalPr;
+    clearCoatPr *= invTotalPr;
+
+    // CDF of the sampling probabilities
+    float cdf[5];
+    cdf[0] = diffPr;
+    cdf[1] = cdf[0] + dielectricPr;
+    cdf[2] = cdf[1] + metalPr;
+    cdf[3] = cdf[2] + glassPr;
+    cdf[4] = cdf[3] + clearCoatPr;
+
+    float r1 = u01(rng) * cdf[4];
+    glm::vec3 half;
+    if (r1 < cdf[0]) {       // Diffuse
+        wiW = cosineSampleHemisphere(ffnormal, rng);
+    }
+    else if (r1 < cdf[2]) {  // Dielectric + Metallic reflection
+        half = sampleGTR2(m.roughness, ffnormal, rng);
+        if (glm::dot(ffnormal, half) < 0.0)
+            half = -half;
+        wiW = glm::normalize(glm::reflect(-woW, half));
+    }
+    else if (r1 < cdf[3]) {  // Glass
+        half = sampleGTR2(m.roughness, ffnormal, rng);
+        float F = dielectricFresnel(abs(glm::dot(woW, half)), eta);
+        if (glm::dot(ffnormal, half) < 0.0)
+            half = -half;
+        // Rescale random number for reuse
+        r1 = (r1 - cdf[2]) / (cdf[3] - cdf[2]);
+        if (r1 < F) { // Reflection
+            wiW = glm::normalize(glm::reflect(-woW, half));
+        }
+        else {      // Transmission
+            wiW = glm::normalize(glm::refract(-woW, half, eta));
+        }
+    }
+    else { // Clearcoat
+        half = sampleGTR1(m.coatroughness, ffnormal, rng);
+        if (glm::dot(ffnormal, half) < 0.0)
+            half = -half;
+        wiW = glm::normalize(glm::reflect(-woW, half));
+    }
+
+    // Evaluate
+    glm::vec3 bsdf(0.f);
+    float pdf = 0.f;
+    const float ffNdotL = glm::dot(wiW, ffnormal);
+    const float ffNdotV = glm::dot(woW, ffnormal);
+
+    bool reflect = ffNdotL * ffNdotV > 0.f;
+
+    float tmpPdf = 0.f;
+    const float VDotH = abs(glm::dot(woW, half));
+    // Diffuse
+    if (diffPr > 0.f && reflect) {
+        bsdf += evaluateDisneyDiffuse(m, woW, wiW, half, ffnormal, tmpPdf) * dielectricWeight;
+        pdf += tmpPdf * diffPr;
+    }
+
+    // Dielectric Reflection
+    if (dielectricPr > 0.f && reflect) {
+        // Normalize for interpolating based on Cspec0
+        float F = dielectricFresnel(VDotH, 1.f / m.ior);
+
+        bsdf += evaluateMicrofacetReflection(m, woW, wiW, half, ffnormal, glm::vec3(F), tmpPdf) * dielectricWeight;
+        pdf += tmpPdf * dielectricPr;
+    }
+
+    // Metallic Reflection
+    if (metalPr > 0.f && reflect) {
+        // Tinted to base color
+        glm::vec3 F = glm::mix(m.color, glm::vec3(1.f), fresnelSchlick(VDotH));
+
+        bsdf += evaluateMicrofacetReflection(m, woW, wiW, half, ffnormal, F, tmpPdf) * metalWeight;
+        pdf += tmpPdf * metalPr;
+    }
+
+    // Glass/Specular BSDF
+    if (glassPr > 0.f) {
+        // Dielectric fresnel
+        float F = dielectricFresnel(VDotH, eta);
+        if (reflect) {
+            bsdf += evaluateMicrofacetReflection(m, woW, wiW, half, ffnormal, glm::vec3(F), tmpPdf) * glassWeight;
+            pdf += tmpPdf * glassPr * F;
+        }
+        else {
+            bsdf += evaluateMicrofacetRefraction(m, eta, woW, wiW, half, ffnormal, glm::vec3(F), tmpPdf) * glassWeight;
+            pdf += tmpPdf * glassPr * (1.f - F);
+        }
+    }
+
+    // Clearcoat
+    if (clearCoatPr > 0.f && reflect) {
+        bsdf += evaluateClearcoat(m, woW, wiW, half, ffnormal, tmpPdf) * 0.25f * m.clearcoat;
+        pdf += tmpPdf * clearCoatPr;
+    }
+
+    if (pdf > 0.f && !isnan(pdf)) {
+        pathSegment.throughput *= bsdf * abs(ffNdotL) / pdf; // absdot * bsdf / pdf = albedo
+        pathSegment.pdf = pdf;
+        pathSegment.ray = { intersect + wiW * EPSILON, wiW };
+    }
+    else {
+        pathSegment.throughput = glm::vec3(0.f);
+        pathSegment.pdf = 1.f;
+        pathSegment.remainingBounces = 0;
+    }
 }
 
 
@@ -382,6 +678,5 @@ __host__ __device__ void directLight(
             radiance += misWeight * (light.emission * float(lightgeoms_size)) * bsdf / pdf_Li * pathSegment.throughput;
     }
 
-    
     pathSegment.color += radiance;
 }

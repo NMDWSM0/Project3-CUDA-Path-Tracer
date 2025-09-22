@@ -55,9 +55,27 @@ void Scene::loadFromJSON(const std::string& jsonName)
         {
             const auto& col = p["RGB"];
             newMaterial.color = glm::vec3(col[0], col[1], col[2]);
-            newMaterial.ior = p.value("IOR", 1.5f);
             newMaterial.transmission = p.value("TRANSMISSION", 0.f);
+            newMaterial.ior = p.value("IOR", 1.5f);
             newMaterial.type = SPECULAR;
+        }
+        else if (p["TYPE"] == "Disney")
+        {
+            const auto& col = p["RGB"];
+            newMaterial.color = glm::vec3(col[0], col[1], col[2]);
+            if (p.contains("EMISSION")) {
+                const auto& emi = p["EMISSION"];
+                newMaterial.emission = glm::vec3(emi[0], emi[1], emi[2]);
+            }
+            newMaterial.roughness = glm::max(p.value("ROUGHNESS", 0.2f), 0.001f);
+            newMaterial.metallic = p.value("METALLIC", 0.f);
+            newMaterial.transmission = p.value("TRANSMISSION", 0.f);
+            newMaterial.ior = p.value("IOR", 1.5f);
+            newMaterial.clearcoat = p.value("CLEARCOAT", 0.f);
+            float coatGlossiness = p.value("CLEARCOAT_GLOSS", 1.f);
+            newMaterial.coatroughness = glm::mix(0.1f, 0.001f, coatGlossiness);
+            newMaterial.subsurface = p.value("SUBSURFACE", 0.f);
+            newMaterial.type = DISNEY;
         }
         MatNameToID[name] = materials.size();
         materials.emplace_back(newMaterial);
