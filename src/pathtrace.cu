@@ -57,6 +57,7 @@ static GuiDataContainer* guiData = NULL;
 static glm::vec3* dev_image = NULL;
 static Geom* dev_geoms = NULL;
 static LightGeom* dev_lightgeoms = NULL;
+static LinearBVHNode* dev_bvhnodes = NULL;
 static Material* dev_materials = NULL;
 static PathSegment* dev_paths_A = NULL;
 static PathSegment* dev_paths_B = NULL;
@@ -95,6 +96,9 @@ void pathtraceInit(Scene* scene)
 
     cudaMalloc(&dev_lightgeoms, scene->lightgeoms.size() * sizeof(LightGeom));
     cudaMemcpy(dev_lightgeoms, scene->lightgeoms.data(), scene->lightgeoms.size() * sizeof(LightGeom), cudaMemcpyHostToDevice);
+
+    cudaMalloc(&dev_bvhnodes, scene->bvhAccel->totalNodes * sizeof(LinearBVHNode));
+    cudaMemcpy(dev_bvhnodes, scene->bvhAccel->nodes, scene->bvhAccel->totalNodes * sizeof(LinearBVHNode), cudaMemcpyHostToDevice);
 
     cudaMalloc(&dev_materials, scene->materials.size() * sizeof(Material));
     cudaMemcpy(dev_materials, scene->materials.data(), scene->materials.size() * sizeof(Material), cudaMemcpyHostToDevice);
@@ -140,6 +144,8 @@ void pathtraceFree()
     cudaFree(dev_paths_A);
     cudaFree(dev_paths_B);
     cudaFree(dev_geoms);
+    cudaFree(dev_lightgeoms);
+    cudaFree(dev_bvhnodes);
     cudaFree(dev_materials);
     cudaFree(dev_intersections);
     // clean up any extra device memory
@@ -257,6 +263,7 @@ __global__ void computeIntersections(
     int depth,
     int num_paths,
     PathSegment* pathSegments,
+    LinearBVHNode* bvhNodes,
     Geom* geoms,
     int geoms_size,
     LightGeom* lightgeoms,
@@ -272,6 +279,7 @@ __global__ void computeIntersections(
     int depth,
     int num_paths,
     PathSegment* pathSegments,
+    LinearBVHNode* bvhNodes,
     Geom* geoms,
     int geoms_size,
     LightGeom* lightgeoms,
@@ -304,7 +312,7 @@ __global__ void computeIntersections(
             hit = false;
         }
         else {
-            hit = getClosestHit(ray, geoms, geoms_size, lightgeoms, lightgeoms_size, vertexPos, vertexNor, vertexUV, isect);
+            hit = getClosestHit(ray, bvhNodes, geoms, geoms_size, lightgeoms, lightgeoms_size, vertexPos, vertexNor, vertexUV, isect);
         }
 
 #if MATERIAL_SORT
@@ -350,6 +358,7 @@ __global__ void shadeFakeMaterial(
     PathSegment* pathSegments,
     PathSegment* out_pathSegments,
     int* pathIndices,
+    LinearBVHNode* bvhNodes,
     Geom* geoms,
     int geoms_size,
     LightGeom* lightgeoms,
@@ -364,6 +373,7 @@ __global__ void shadeFakeMaterial(
     ShadeableIntersection* shadeableIntersections,
     PathSegment* pathSegments,
     int* bPathRemains,
+    LinearBVHNode* bvhNodes,
     Geom* geoms,
     int geoms_size,
     LightGeom* lightgeoms,
@@ -413,6 +423,7 @@ __global__ void shadeMaterial(
     PathSegment* pathSegments,
     PathSegment* out_pathSegments,
     int* pathIndices,
+    LinearBVHNode* bvhNodes,
     Geom* geoms,
     int geoms_size,
     LightGeom* lightgeoms,
@@ -429,6 +440,7 @@ __global__ void shadeMaterial(
     ShadeableIntersection* shadeableIntersections,
     PathSegment* pathSegments,
     int* bPathRemains,
+    LinearBVHNode* bvhNodes,
     Geom* geoms,
     int geoms_size,
     LightGeom* lightgeoms,
@@ -488,7 +500,7 @@ __global__ void shadeMaterial(
             {
                 glm::vec3 intersectPos = intersection.t * segment.ray.direction + segment.ray.origin;
 #if MIS
-                directLight(geoms, geoms_size, lightgeoms, lightgeoms_size, vertexPos, segment, intersectPos, intersection.surfaceNormal, material, rng);
+                directLight(bvhNodes, geoms, geoms_size, lightgeoms, lightgeoms_size, vertexPos, segment, intersectPos, intersection.surfaceNormal, material, rng);
 #endif
                 Sample_f(segment, intersectPos, intersection.surfaceNormal, material, rng);
                 segment.remainingBounces--;
@@ -593,6 +605,7 @@ void pathtrace(uchar4* pbo, int frame, int iter)
             depth,
             num_paths,
             dev_paths,
+            dev_bvhnodes,
             dev_geoms,
             hst_scene->geoms.size(),
             dev_lightgeoms,
@@ -609,6 +622,7 @@ void pathtrace(uchar4* pbo, int frame, int iter)
             depth,
             num_paths,
             dev_paths,
+            dev_bvhnodes,
             dev_geoms,
             hst_scene->geoms.size(),
             dev_lightgeoms,
@@ -642,6 +656,7 @@ void pathtrace(uchar4* pbo, int frame, int iter)
             dev_paths,
             dev_paths_next,
             dev_pathindices,
+            dev_bvhnodes,
             dev_geoms,
             hst_scene->geoms.size(),
             dev_lightgeoms,
@@ -659,6 +674,7 @@ void pathtrace(uchar4* pbo, int frame, int iter)
             dev_intersections,
             dev_paths,
             dev_pathremains,
+            dev_bvhnodes,
             dev_geoms,
             hst_scene->geoms.size(),
             dev_lightgeoms,

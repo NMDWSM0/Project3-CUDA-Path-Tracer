@@ -60,6 +60,7 @@ set(headers
     src/utilities.h
     src/bsdf.h
     src/postprocess.h
+    src/bvh.h
 )
 
 set(sources
@@ -74,6 +75,7 @@ set(sources
     src/utilities.cpp
     src/bsdf.cu
     src/sceneStructs.cpp
+    src/bvh.cpp
 )
 
 set(imgui_headers

@@ -1,6 +1,8 @@
 #include "intersections.h"
 #include "utilities.h"
 
+#define BVH 1
+
 __host__ __device__ float AABBIntersect(glm::vec3 minCorner, glm::vec3 maxCorner, const Ray& r)
 {
     glm::vec3 invDir = glm::vec3(1.0) / r.direction;
@@ -87,6 +89,7 @@ __host__ __device__ float TriangleIntersect(glm::vec3 v0, glm::vec3 v1, glm::vec
 
 __host__ __device__ bool getAnyHit(
     const Ray& r,
+    LinearBVHNode* bvhNodes,
     Geom* geoms,
     int geoms_size,
     LightGeom* lightgeoms,
@@ -127,9 +130,75 @@ __host__ __device__ bool getAnyHit(
     }
 
     // check meshes, if distance smaller than light source than override it
-    // TODO: Use BVH instead
     glm::vec3 barycentricParameters;
     glm::ivec3 vertIds;
+#if BVH
+    // traversal stack
+    int stack[64];
+    int ptr = 0;
+    stack[ptr++] = -1;  // adding a tag to record if traversed without intersection
+    int bvhIdx = 0;
+    while (bvhIdx >= 0) 
+    {
+        LinearBVHNode curNode = bvhNodes[bvhIdx];
+        if (curNode.nPrimitives > 0) {
+            // leaf node
+            Geom geom = geoms[curNode.geomID];
+            float distance = -1;
+            if (geom.type == TRIANGLE)
+            {
+                vertIds = geom.vertIds;
+                distance = TriangleIntersect(vertexPos[vertIds[0]], vertexPos[vertIds[1]], vertexPos[vertIds[2]], r, barycentricParameters);
+            }
+            else if (geom.type == SPHERE)
+            {
+                distance = SphereIntersect(geom.radius, geom.center, r);
+            }
+
+            // Compute the minimum t from the intersection tests to determine what
+            // scene geometry object was hit first.
+            if (distance > 0.0f && distance < maxt)
+            {
+                return true;
+            }
+        }
+        else {
+            int leftIndex = bvhIdx + 1;
+            int rightIndex = curNode.secondChildOffset;
+            LinearBVHNode& leftNode = bvhNodes[leftIndex];
+            LinearBVHNode& rightNode = bvhNodes[rightIndex];
+            float leftHit = 0.0, rightHit = 0.0;
+            leftHit = AABBIntersect(leftNode.bounds.pMin, leftNode.bounds.pMax, r);
+            rightHit = AABBIntersect(rightNode.bounds.pMin, rightNode.bounds.pMax, r);
+            // chech hit and distance
+            if (leftHit > 0.0 && rightHit > 0.0) {
+                int nextIndex;
+                if (leftHit > rightHit) {
+                    bvhIdx = rightIndex;     // first go right
+                    nextIndex = leftIndex;   // go left later
+                }
+                else {
+                    bvhIdx = leftIndex;      // first go left
+                    nextIndex = rightIndex;  // go right later
+                }
+                stack[ptr++] = nextIndex;
+                continue;
+            }
+            else if (leftHit > 0.) {
+                bvhIdx = leftIndex;
+                continue;
+            }
+            else if (rightHit > 0.) {
+                bvhIdx = rightIndex;
+                continue;
+            }
+        }
+        // why we are here ?
+        // 1. after checking a leaf node of meshBVH, we must go back
+        // 2. we miss all the childnode of current node, we must go back
+        bvhIdx = stack[--ptr];
+    }
+#else
     for (int i = 0; i < geoms_size; i++)
     {
         Geom geom = geoms[i];
@@ -151,7 +220,7 @@ __host__ __device__ bool getAnyHit(
             return true;
         }
     }
-
+#endif
     // No intersections before maxt
     return false;
 }
@@ -159,6 +228,7 @@ __host__ __device__ bool getAnyHit(
 
 __host__ __device__ bool getClosestHit(
     const Ray& r,
+    LinearBVHNode* bvhNodes,
     Geom* geoms,
     int geoms_size,
     LightGeom* lightgeoms,
@@ -213,13 +283,96 @@ __host__ __device__ bool getClosestHit(
     }
 
     // check meshes, if distance smaller than light source than override it
-    // TODO: Use BVH instead
     int hit_geom_index = -1;
     int materialID = -1;
     GeomType hitType;
     glm::vec3 barycentricParameters;
     glm::ivec3 vertIds;
     glm::vec3 vp0, vp1, vp2, center;
+#if BVH
+    // traversal stack
+    int stack[64];
+    int ptr = 0;
+    stack[ptr++] = -1;  // adding a tag to record if traversed without intersection
+    int bvhIdx = 0;
+    while (bvhIdx >= 0)
+    {
+        LinearBVHNode curNode = bvhNodes[bvhIdx];
+        if (curNode.nPrimitives > 0) {
+            // leaf node
+            Geom geom = geoms[curNode.geomID];
+            float distance = -1;
+            glm::vec3 temp_bary;
+            glm::ivec3 temp_vertIds;
+            glm::vec3 temp_vp0, temp_vp1, temp_vp2, temp_center;
+            if (geom.type == TRIANGLE)
+            {
+                temp_vertIds = geom.vertIds;
+                temp_vp0 = vertexPos[temp_vertIds[0]];
+                temp_vp1 = vertexPos[temp_vertIds[1]];
+                temp_vp2 = vertexPos[temp_vertIds[2]];
+                distance = TriangleIntersect(temp_vp0, temp_vp1, temp_vp2, r, temp_bary);
+            }
+            else if (geom.type == SPHERE)
+            {
+                temp_center = geom.center;
+                distance = SphereIntersect(geom.radius, temp_center, r);
+            }
+
+            // Compute the minimum t from the intersection tests to determine what
+            // scene geometry object was hit first.
+            if (distance > 0.0f && distance < t)
+            {
+                t = distance;
+                hit_geom_index = curNode.geomID;
+                materialID = geom.materialid;
+                hitType = geom.type;
+                // copy some hit info
+                vertIds = temp_vertIds;
+                barycentricParameters = temp_bary;
+                vp0 = temp_vp0;
+                vp1 = temp_vp1;
+                vp2 = temp_vp2;
+                center = temp_center;
+            }
+        }
+        else {
+            int leftIndex = bvhIdx + 1;
+            int rightIndex = curNode.secondChildOffset;
+            LinearBVHNode& leftNode = bvhNodes[leftIndex];
+            LinearBVHNode& rightNode = bvhNodes[rightIndex];
+            float leftHit = 0.0, rightHit = 0.0;
+            leftHit = AABBIntersect(leftNode.bounds.pMin, leftNode.bounds.pMax, r);
+            rightHit = AABBIntersect(rightNode.bounds.pMin, rightNode.bounds.pMax, r);
+            // chech hit and distance
+            if (leftHit > 0.0 && rightHit > 0.0) {
+                int nextIndex;
+                if (leftHit > rightHit) {
+                    bvhIdx = rightIndex;     // first go right
+                    nextIndex = leftIndex;   // go left later
+                }
+                else {
+                    bvhIdx = leftIndex;      // first go left
+                    nextIndex = rightIndex;  // go right later
+                }
+                stack[ptr++] = nextIndex;
+                continue;
+            }
+            else if (leftHit > 0.) {
+                bvhIdx = leftIndex;
+                continue;
+            }
+            else if (rightHit > 0.) {
+                bvhIdx = rightIndex;
+                continue;
+            }
+        }
+        // why we are here ?
+        // 1. after checking a leaf node of meshBVH, we must go back
+        // 2. we miss all the childnode of current node, we must go back
+        bvhIdx = stack[--ptr];
+    }
+#else
     for (int i = 0; i < geoms_size; i++)
     {
         Geom geom = geoms[i];
@@ -258,6 +411,7 @@ __host__ __device__ bool getClosestHit(
             center = temp_center;
         }
     }
+#endif
 
     // No intersections
     if (t == INFINITY)

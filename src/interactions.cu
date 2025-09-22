@@ -659,6 +659,7 @@ __host__ __device__ void Sample_Li(
 
 
 __host__ __device__ void directLight(
+    LinearBVHNode* bvhNodes,
     Geom* geoms,
     int geoms_size,
     LightGeom* lightgeoms,
@@ -688,7 +689,7 @@ __host__ __device__ void directLight(
 
     // check shadow
     Ray shadowRay = Ray(scatterPos, lightDir);
-    bool inShadow = getAnyHit(shadowRay, geoms, geoms_size, lightgeoms, lightgeoms_size, vertexPos, lightDist - EPSILON);
+    bool inShadow = getAnyHit(shadowRay, bvhNodes, geoms, geoms_size, lightgeoms, lightgeoms_size, vertexPos, lightDist - EPSILON);
 
     if (!inShadow) {
         float pdf_bsdf;

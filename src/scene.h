@@ -1,6 +1,7 @@
 #pragma once
 
 #include "sceneStructs.h"
+#include "bvh.h"
 #include <vector>
 
 class Scene
@@ -19,4 +20,5 @@ public:
     std::vector<Texture> textures;
     Texture envMap;
     RenderState state;
+    std::shared_ptr<BVHAccel> bvhAccel;
 };

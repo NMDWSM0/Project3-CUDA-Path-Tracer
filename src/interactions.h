@@ -2,6 +2,7 @@
 
 #include "sceneStructs.h"
 #include "bsdf.h"
+#include "bvh.h"
 
 #include <glm/glm.hpp>
 
@@ -61,6 +62,7 @@ __host__ __device__ void Sample_Li(
     thrust::default_random_engine& rng);
 
 __host__ __device__ void directLight(
+    LinearBVHNode* bvhNodes,
     Geom* geoms,
     int geoms_size,
     LightGeom* lightgeoms,

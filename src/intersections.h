@@ -1,6 +1,7 @@
 #pragma once
 
 #include "sceneStructs.h"
+#include "bvh.h"
 
 #include <glm/glm.hpp>
 #include <glm/gtx/intersect.hpp>
@@ -39,6 +40,7 @@ __host__ __device__ inline glm::vec3 multiplyMV(glm::mat4 m, glm::vec4 v)
 
 __host__ __device__ bool getClosestHit(
     const Ray& r,
+    LinearBVHNode* bvhNodes,
     Geom* geoms,
     int geoms_size,
     LightGeom* lightgeoms,
@@ -50,6 +52,7 @@ __host__ __device__ bool getClosestHit(
 
 __host__ __device__ bool getAnyHit(
     const Ray& r,
+    LinearBVHNode* bvhNodes,
     Geom* geoms,
     int geoms_size,
     LightGeom* lightgeoms,

@@ -221,6 +221,19 @@ void Scene::loadFromJSON(const std::string& jsonName)
         }
     }
 
+    // Create BVH
+    std::vector<std::shared_ptr<Primitive>> primitives;
+    for (int i = 0; i < geoms.size(); ++i) {
+        const Geom& geom = geoms[i];
+        if (geom.type == SPHERE) {
+            primitives.push_back(std::make_shared<Primitive>(i, geom.center, geom.radius));
+        }
+        else {
+            primitives.push_back(std::make_shared<Primitive>(i, vertPos[geom.vertIds[0]], vertPos[geom.vertIds[1]], vertPos[geom.vertIds[2]]));
+        }
+    }
+    bvhAccel = CreateBVHAccelerator(primitives, 1);
+
     // Env Map
     if (data.contains("EnvMap")) {
         const auto& EnvMapData = data["EnvMap"];
