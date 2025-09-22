@@ -4,6 +4,8 @@
 
 #include <thrust/random.h>
 
+#define TOON_SHADING 0
+
 __host__ __device__ glm::vec3 cosineSampleHemisphere(
     glm::vec3 normal,
     thrust::default_random_engine &rng)
@@ -254,6 +256,13 @@ __host__ __device__ glm::vec3 F_Disney(
     if (diffPr > 0.f && reflect) {
         bsdf += evaluateDisneyDiffuse(m, woW, wiW, half, ffnormal, tmpPdf) * dielectricWeight;
         pdf += tmpPdf * diffPr;
+
+#if TOON_SHADING
+        if (abs(NdotL) > 0.01f) {
+            bsdf /= abs(NdotL);
+            bsdf *= (1 - pow(1 - abs(NdotL), 100.f)) * 0.5f;
+        }
+#endif
     }
 
     // Dielectric Reflection
@@ -449,6 +458,13 @@ __host__ __device__ void Sample_f_Disney(
     if (diffPr > 0.f && reflect) {
         bsdf += evaluateDisneyDiffuse(m, woW, wiW, half, ffnormal, tmpPdf) * dielectricWeight;
         pdf += tmpPdf * diffPr;
+
+#if TOON_SHADING
+        if (abs(ffNdotL) > 0.01f) {
+            bsdf /= abs(ffNdotL);
+            bsdf *= (1 - pow(1 - abs(ffNdotL), 100.f)) * 0.5f;
+        }
+#endif
     }
 
     // Dielectric Reflection
@@ -490,7 +506,7 @@ __host__ __device__ void Sample_f_Disney(
     }
 
     if (pdf > 0.f && !isnan(pdf)) {
-        pathSegment.throughput *= bsdf * abs(ffNdotL) / pdf; // absdot * bsdf / pdf = albedo
+        pathSegment.throughput *= bsdf * abs(ffNdotL) / pdf;
         pathSegment.pdf = pdf;
         pathSegment.ray = { intersect + wiW * EPSILON, wiW };
     }

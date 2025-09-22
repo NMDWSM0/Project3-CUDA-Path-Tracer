@@ -15,6 +15,7 @@
 #include "utilities.h"
 #include "intersections.h"
 #include "interactions.h"
+#include "postprocess.h"
 #include "../stream_compaction/efficient.h"
 
 #define ERRORCHECK 0
@@ -59,7 +60,7 @@ thrust::default_random_engine makeSeededRandomEngine(int iter, int index, int de
 }
 
 //Kernel that writes the image to the OpenGL PBO directly.
-__global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution, int iter, glm::vec3* image)
+__global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution, int iter, glm::vec3* image, ColorGradingParams params)
 {
     int x = (blockIdx.x * blockDim.x) + threadIdx.x;
     int y = (blockIdx.y * blockDim.y) + threadIdx.y;
@@ -69,10 +70,13 @@ __global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution, int iter, glm
         int index = x + (y * resolution.x);
         glm::vec3 pix = image[index];
 
+        glm::vec3 avgcol = pix / (float)iter;
+        glm::vec3 finalCol = gradeAndToneMap(avgcol, params);
+
         glm::ivec3 color;
-        color.x = glm::clamp((int)(pix.x / iter * 255.0), 0, 255);
-        color.y = glm::clamp((int)(pix.y / iter * 255.0), 0, 255);
-        color.z = glm::clamp((int)(pix.z / iter * 255.0), 0, 255);
+        color.x = glm::clamp((int)(finalCol.x * 255.0), 0, 255);
+        color.y = glm::clamp((int)(finalCol.y * 255.0), 0, 255);
+        color.z = glm::clamp((int)(finalCol.z * 255.0), 0, 255);
 
         // Each thread writes one pixel location in the texture (textel)
         pbo[index].w = 0;
@@ -649,8 +653,25 @@ void pathtrace(uchar4* pbo, int frame, int iter)
 #endif // MATERIAL_SORT
     ///////////////////////////////////////////////////////////////////////////
 
+    ColorGradingParams postprocess_params{
+        0.0f,     // Exposure(EV)
+        0.0f,     // White-balance:temperature [-1, +1]
+        0.0f,     // White-balance:tint [-1, +1]
+        1.0f,     // Saturation [0, 2]
+        0.2f,     // Vibrance [0, 1] 
+        1.1f,     // Contrast [0, 2] around pivot
+        0.18f,
+        //tone curve
+        false,    // Whether use ACES or Reinhard-L
+        0.0f,     // reinhard-L whitepoint
+        // cdl params
+        glm::vec3(1.0f),
+        glm::vec3(0.0f),
+        glm::vec3(1.0f)
+    };
+
     // Send results to OpenGL buffer for rendering
-    sendImageToPBO << <blocksPerGrid2d, blockSize2d >> > (pbo, cam.resolution, iter, dev_image);
+    sendImageToPBO << <blocksPerGrid2d, blockSize2d >> > (pbo, cam.resolution, iter, dev_image, postprocess_params);
 
     // Retrieve image from GPU
     cudaMemcpy(hst_scene->state.image.data(), dev_image,

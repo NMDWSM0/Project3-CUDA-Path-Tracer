@@ -21,11 +21,11 @@
         "disney_white": {
             "TYPE": "Disney",
             "RGB": [0.98, 0.98, 0.98],
-            "ROUGHNESS": 0.8,
-            "METALLIC": 1.0,
+            "ROUGHNESS": 0.01,
+            "METALLIC": 0.0,
             "TRANSMISSION": 0.0,
             "IOR": 1.5,
-            "CLEARCOAT": 1.0,
+            "CLEARCOAT": 0.0,
             "CLEARCOAT_GLOSS": 1.0,
             "SUBSURFACE": 0.0
         }

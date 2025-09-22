@@ -59,6 +59,7 @@ set(headers
     src/sceneStructs.h
     src/utilities.h
     src/bsdf.h
+    src/postprocess.h
 )
 
 set(sources

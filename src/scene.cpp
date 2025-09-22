@@ -1,6 +1,7 @@
 #include "scene.h"
 
 #include "utilities.h"
+#include "postprocess.h"
 
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtx/string_cast.hpp>
@@ -48,13 +49,13 @@ void Scene::loadFromJSON(const std::string& jsonName)
         if (p["TYPE"] == "Diffuse")
         {
             const auto& col = p["RGB"];
-            newMaterial.color = glm::vec3(col[0], col[1], col[2]);
+            newMaterial.color = srgbToLinear(glm::vec3(col[0], col[1], col[2]));
             newMaterial.type = DIFFUSE;
         }
         else if (p["TYPE"] == "Specular")
         {
             const auto& col = p["RGB"];
-            newMaterial.color = glm::vec3(col[0], col[1], col[2]);
+            newMaterial.color = srgbToLinear(glm::vec3(col[0], col[1], col[2]));
             newMaterial.transmission = p.value("TRANSMISSION", 0.f);
             newMaterial.ior = p.value("IOR", 1.5f);
             newMaterial.type = SPECULAR;
@@ -62,7 +63,7 @@ void Scene::loadFromJSON(const std::string& jsonName)
         else if (p["TYPE"] == "Disney")
         {
             const auto& col = p["RGB"];
-            newMaterial.color = glm::vec3(col[0], col[1], col[2]);
+            newMaterial.color = srgbToLinear(glm::vec3(col[0], col[1], col[2]));
             if (p.contains("EMISSION")) {
                 const auto& emi = p["EMISSION"];
                 newMaterial.emission = glm::vec3(emi[0], emi[1], emi[2]);
