@@ -34,6 +34,15 @@ Scene::Scene(string filename)
 
 void Scene::loadFromJSON(const std::string& jsonName)
 {
+    size_t slashpos = jsonName.find_last_of('/');
+    std::string baseDir;
+    if (slashpos != std::string::npos) {
+        baseDir = jsonName.substr(0, slashpos + 1);
+    }
+    else {
+        baseDir = "";
+    }
+
     std::ifstream f(jsonName);
     json data = json::parse(f);
 
@@ -210,6 +219,14 @@ void Scene::loadFromJSON(const std::string& jsonName)
 
             geoms.push_back(newGeom);
         }
+    }
+
+    // Env Map
+    if (data.contains("EnvMap")) {
+        const auto& EnvMapData = data["EnvMap"];
+        const auto& envmap_path = EnvMapData["PATH"];
+        std::string fullenvpath = baseDir + envmap_path.get<std::string>();
+        envMap.loadToCPU(fullenvpath);
     }
 
     // Camera ans State settings

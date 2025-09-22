@@ -32,6 +32,10 @@
  *
  * You may need to change the parameter list for your purposes!
  */
+__device__ glm::vec3 Evaluate_EnvMap(
+    Ray& r, 
+    cudaTextureObject_t envmapHandle);
+
 __host__ __device__ glm::vec3 Evaluate_f(
     const PathSegment& pathSegment,
     glm::vec3 intersect,

@@ -587,7 +587,15 @@ __host__ __device__ void Sample_Li_Directional (
 
 
 
+__device__ glm::vec3 Evaluate_EnvMap(Ray& r, cudaTextureObject_t envmapHandle)
+{
+    float theta = acos(glm::clamp(r.direction.y, -1.f, 1.f));
+    glm::vec2 uv = glm::vec2((PI + glm::atan(r.direction.z, r.direction.x)) * INV_TWO_PI, theta * INV_PI);
 
+    float4 c = tex2D<float4>(envmapHandle, uv.x, uv.y);
+
+    return glm::vec3(c.x, c.y, c.z);
+}
 
 __host__ __device__ glm::vec3 Evaluate_f(
     const PathSegment& pathSegment,

@@ -326,6 +326,9 @@ void mainLoop()
         glfwSwapBuffers(window);
     }
 
+    pathtraceFree();
+    cudaDeviceReset();
+
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();
@@ -385,6 +388,8 @@ int main(int argc, char** argv)
     // Initialize ImGui Data
     InitImguiData(guiData);
     InitDataContainer(guiData);
+
+    pathtraceInit(scene);
 
     // GLFW main loop
     mainLoop();
@@ -446,8 +451,7 @@ void runCuda()
 
     if (iteration == 0)
     {
-        pathtraceFree();
-        pathtraceInit(scene);
+        pathtraceClear();
     }
 
     if (iteration < renderState->iterations)

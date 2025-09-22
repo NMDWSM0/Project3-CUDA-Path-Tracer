@@ -52,40 +52,6 @@ void checkCUDAErrorFn(const char* msg, const char* file, int line)
 #endif // ERRORCHECK
 }
 
-__host__ __device__
-thrust::default_random_engine makeSeededRandomEngine(int iter, int index, int depth)
-{
-    int h = utilhash((1 << 31) | (depth << 22) | iter) ^ utilhash(index);
-    return thrust::default_random_engine(h);
-}
-
-//Kernel that writes the image to the OpenGL PBO directly.
-__global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution, int iter, glm::vec3* image, ColorGradingParams params)
-{
-    int x = (blockIdx.x * blockDim.x) + threadIdx.x;
-    int y = (blockIdx.y * blockDim.y) + threadIdx.y;
-
-    if (x < resolution.x && y < resolution.y)
-    {
-        int index = x + (y * resolution.x);
-        glm::vec3 pix = image[index];
-
-        glm::vec3 avgcol = pix / (float)iter;
-        glm::vec3 finalCol = gradeAndToneMap(avgcol, params);
-
-        glm::ivec3 color;
-        color.x = glm::clamp((int)(finalCol.x * 255.0), 0, 255);
-        color.y = glm::clamp((int)(finalCol.y * 255.0), 0, 255);
-        color.z = glm::clamp((int)(finalCol.z * 255.0), 0, 255);
-
-        // Each thread writes one pixel location in the texture (textel)
-        pbo[index].w = 0;
-        pbo[index].x = color.x;
-        pbo[index].y = color.y;
-        pbo[index].z = color.z;
-    }
-}
-
 static Scene* hst_scene = NULL;
 static GuiDataContainer* guiData = NULL;
 static glm::vec3* dev_image = NULL;
@@ -102,6 +68,8 @@ static glm::vec2* dev_vertUV = NULL;
 static int* dev_pathremains = NULL;
 static int* dev_pathindices = NULL;
 static char* dev_mattypes = NULL;
+static cudaTextureObject_t* dev_texurehandles = NULL;
+static cudaTextureObject_t envmaphandle;
 
 void InitDataContainer(GuiDataContainer* imGuiData)
 {
@@ -152,6 +120,14 @@ void pathtraceInit(Scene* scene)
     cudaMalloc(&dev_pathremains, pixelcount * sizeof(int));
     cudaMalloc(&dev_pathindices, pixelcount * sizeof(int));
 
+    envmaphandle = scene->envMap.loadToCuda();
+
+    cudaMalloc(&dev_texurehandles, scene->textures.size() * sizeof(cudaTextureObject_t));
+    for (int i = 0; i < scene->textures.size(); ++i) {
+        auto handle = scene->textures[i].loadToCuda();
+        cudaMemcpy(dev_texurehandles + i, &handle, sizeof(cudaTextureObject_t), cudaMemcpyHostToDevice);
+    }
+
     // buffer size used for scan should be bigger
     StreamCompaction::EfficientSharedMem::initializeBuffers(pixelcount_pot);
 
@@ -173,11 +149,71 @@ void pathtraceFree()
     cudaFree(dev_pathremains);
     cudaFree(dev_pathindices);
     cudaFree(dev_mattypes);
+    cudaFree(dev_texurehandles);
+
+    for (int i = 0; i < hst_scene->textures.size(); ++i) {
+        hst_scene->textures[i].FreeCudaSide();
+    }
 
     StreamCompaction::EfficientSharedMem::freeBuffers();
 
     checkCUDAError("pathtraceFree");
 }
+
+void pathtraceClear()
+{
+    const Camera& cam = hst_scene->state.camera;
+    const int pixelcount = cam.resolution.x * cam.resolution.y;
+
+    cudaMemset(dev_image, 0, pixelcount * sizeof(glm::vec3));
+    cudaMemset(dev_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
+
+    checkCUDAError("pathtraceClear");
+}
+
+
+
+
+
+
+
+
+
+__host__ __device__
+thrust::default_random_engine makeSeededRandomEngine(int iter, int index, int depth)
+{
+    int h = utilhash((1 << 31) | (depth << 22) | iter) ^ utilhash(index);
+    return thrust::default_random_engine(h);
+}
+
+
+//Kernel that writes the image to the OpenGL PBO directly.
+__global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution, int iter, glm::vec3* image, ColorGradingParams params)
+{
+    int x = (blockIdx.x * blockDim.x) + threadIdx.x;
+    int y = (blockIdx.y * blockDim.y) + threadIdx.y;
+
+    if (x < resolution.x && y < resolution.y)
+    {
+        int index = x + (y * resolution.x);
+        glm::vec3 pix = image[index];
+
+        glm::vec3 avgcol = pix / (float)iter;
+        glm::vec3 finalCol = gradeAndToneMap(avgcol, params);
+
+        glm::ivec3 color;
+        color.x = glm::clamp((int)(finalCol.x * 255.0), 0, 255);
+        color.y = glm::clamp((int)(finalCol.y * 255.0), 0, 255);
+        color.z = glm::clamp((int)(finalCol.z * 255.0), 0, 255);
+
+        // Each thread writes one pixel location in the texture (textel)
+        pbo[index].w = 0;
+        pbo[index].x = color.x;
+        pbo[index].y = color.y;
+        pbo[index].z = color.z;
+    }
+}
+
 
 /**
 * Generate PathSegments with rays from the camera through the screen into the
@@ -382,7 +418,9 @@ __global__ void shadeMaterial(
     LightGeom* lightgeoms,
     int lightgeoms_size,
     glm::vec3* vertexPos,
-    Material* materials)
+    Material* materials,
+    cudaTextureObject_t* textureHandles,
+    cudaTextureObject_t envmapHandle)
 #else
 __global__ void shadeMaterial(
     int iter,
@@ -396,7 +434,9 @@ __global__ void shadeMaterial(
     LightGeom* lightgeoms,
     int lightgeoms_size,
     glm::vec3* vertexPos,
-    Material* materials)
+    Material* materials,
+    cudaTextureObject_t* textureHandles,
+    cudaTextureObject_t envmapHandle)
 #endif // MATERIAL_SORT
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -475,6 +515,9 @@ __global__ void shadeMaterial(
         }
         else {
             // not hit
+            glm::vec3 envCol = envmapHandle > 0 ? Evaluate_EnvMap(segment.ray, envmapHandle) : glm::vec3(0.f);
+            segment.color += envCol * segment.throughput;
+            // clear throughput
             segment.throughput = glm::vec3(0.0f);
             segment.remainingBounces = -1;
         }
@@ -604,7 +647,9 @@ void pathtrace(uchar4* pbo, int frame, int iter)
             dev_lightgeoms,
             hst_scene->lightgeoms.size(),
             dev_vertPos,
-            dev_materials
+            dev_materials,
+            dev_texurehandles,
+            envmaphandle
             );
 #else
         shadeMaterial << <numblocksPathSegmentTracing, blockSize1d >> > (
@@ -619,7 +664,9 @@ void pathtrace(uchar4* pbo, int frame, int iter)
             dev_lightgeoms,
             hst_scene->lightgeoms.size(),
             dev_vertPos,
-            dev_materials
+            dev_materials,
+            dev_texurehandles,
+            envmaphandle
             );
         cudaDeviceSynchronize();
 
@@ -658,7 +705,7 @@ void pathtrace(uchar4* pbo, int frame, int iter)
         0.0f,     // White-balance:temperature [-1, +1]
         0.0f,     // White-balance:tint [-1, +1]
         1.0f,     // Saturation [0, 2]
-        0.2f,     // Vibrance [0, 1] 
+        0.1f,     // Vibrance [0, 1] 
         1.1f,     // Contrast [0, 2] around pivot
         0.18f,
         //tone curve

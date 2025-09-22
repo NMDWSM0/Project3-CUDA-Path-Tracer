@@ -16,5 +16,7 @@ public:
     std::vector<glm::vec3> vertNor;
     std::vector<glm::vec2> vertUV;
     std::vector<Material> materials;
+    std::vector<Texture> textures;
+    Texture envMap;
     RenderState state;
 };

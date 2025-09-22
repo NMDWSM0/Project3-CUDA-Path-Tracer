@@ -73,6 +73,7 @@ set(sources
     src/scene.cpp
     src/utilities.cpp
     src/bsdf.cu
+    src/sceneStructs.cpp
 )
 
 set(imgui_headers

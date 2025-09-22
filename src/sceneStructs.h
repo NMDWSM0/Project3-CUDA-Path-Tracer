@@ -120,6 +120,26 @@ struct Material
     }
 };
 
+
+struct Texture 
+{
+    cudaTextureObject_t handle = 0;
+    cudaArray_t         array = nullptr;
+    std::vector<unsigned char> cpudata;
+    std::vector<float> cpudataHDR;
+    int w = 0, h = 0, c = 0;
+    bool isHDR = false;
+
+    void loadToCPU(const std::string& filename);
+
+    cudaTextureObject_t loadToCuda();
+    // Texture(unsigned char* data); for model loader who loads textures directly into memory
+
+    void FreeCudaSide();
+
+    ~Texture();
+};
+
 struct Camera
 {
     glm::ivec2 resolution;
