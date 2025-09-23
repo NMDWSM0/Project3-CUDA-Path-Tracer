@@ -73,3 +73,9 @@ __host__ __device__ void directLight(
     glm::vec3 normal,
     const Material& m,
     thrust::default_random_engine& rng);
+
+__device__ void getMatParams(
+    Material& mat,
+    const ShadeableIntersection& intersect,
+    glm::vec3& normal,
+    cudaTextureObject_t* textureHandles);

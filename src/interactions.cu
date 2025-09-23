@@ -1,6 +1,7 @@
 #include "interactions.h"
 #include "intersections.h"
 #include "utilities.h"
+#include "postprocess.h"
 
 #include <thrust/random.h>
 
@@ -633,7 +634,6 @@ __host__ __device__ void Sample_f(
     else if (m.type == DISNEY) {
         Sample_f_Disney(pathSegment, intersect, normal, m, rng);
     }
-    
 }
 
 __host__ __device__ void Sample_Li(
@@ -704,4 +704,34 @@ __host__ __device__ void directLight(
     }
 
     pathSegment.color += radiance;
+}
+
+
+__device__ void getMatParams(
+    Material& mat,
+    const ShadeableIntersection& intersect,
+    glm::vec3& normal,
+    cudaTextureObject_t* textureHandles)
+{
+    // parse textures
+    glm::vec2 uv = intersect.texCoord;
+    if (mat.baseColorTexId >= 0) {
+        float4 c = tex2D<float4>(textureHandles[mat.baseColorTexId], uv.x, uv.y);
+        mat.color = srgbToLinear(glm::vec3(c.x, c.y, c.z));
+    }
+    if (mat.metallicRoughnessTexId >= 0) {
+        float4 matrgh = tex2D<float4>(textureHandles[mat.metallicRoughnessTexId], uv.x, uv.y);
+        mat.metallic = matrgh.x;
+        mat.roughness = glm::max(matrgh.y, 0.001f);
+    }
+    if (mat.normalmapTexId >= 0) {
+        float4 c = tex2D<float4>(textureHandles[mat.normalmapTexId], uv.x, uv.y);
+        glm::vec3 normal_tspace = glm::normalize(glm::vec3(c.x, c.y, c.z));
+        glm::vec3 bitangent = glm::cross(intersect.surfaceNormal, intersect.tangent);
+        normal = glm::normalize(intersect.tangent * normal_tspace.x + bitangent * normal_tspace.y + intersect.surfaceNormal * normal_tspace.z);
+    }
+    if (mat.emissionmapTexId >= 0) {
+        float4 c = tex2D<float4>(textureHandles[mat.emissionmapTexId], uv.x, uv.y);
+        mat.emission = glm::vec3(c.x, c.y, c.z);
+    }
 }

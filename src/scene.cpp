@@ -301,7 +301,7 @@ void loadMaterials(Scene* scene, tinygltf::Model& gltfModel)
             material.emissionmapTexId = gltfMaterial.emissiveTexture.index + sceneTexIdx;
 
         // Roughness and Metallic
-        material.roughness = sqrtf((float)pbr.roughnessFactor);
+        material.roughness = (float)pbr.roughnessFactor;
         material.metallic = (float)pbr.metallicFactor;
         if (pbr.metallicRoughnessTexture.index > -1)
             material.metallicRoughnessTexId = pbr.metallicRoughnessTexture.index + sceneTexIdx;
@@ -329,14 +329,14 @@ void loadMaterials(Scene* scene, tinygltf::Model& gltfModel)
 
         // KHR_materials_clearcoat
         material.clearcoat = 0.f;
-        material.coatroughness = 0.f;
+        material.coatroughness = 0.001f;
         if (gltfMaterial.extensions.find("KHR_materials_clearcoat") != gltfMaterial.extensions.end())
         {
             const auto& ext = gltfMaterial.extensions.at("KHR_materials_clearcoat");
             if (ext.Has("clearcoatFactor"))
                 material.clearcoat = (float)(ext.Get("clearcoatFactor").Get<double>());
             if (ext.Has("clearcoatRoughnessFactor"))
-                material.coatroughness = (float)(ext.Get("clearcoatRoughnessFactor").Get<double>());
+                material.coatroughness = fmax((float)(ext.Get("clearcoatRoughnessFactor").Get<double>()), 0.001f);
         }
 
         // KHR_materials_emissive_strength

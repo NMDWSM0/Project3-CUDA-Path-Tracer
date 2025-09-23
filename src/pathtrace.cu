@@ -55,6 +55,7 @@ void checkCUDAErrorFn(const char* msg, const char* file, int line)
 static Scene* hst_scene = NULL;
 static GuiDataContainer* guiData = NULL;
 static glm::vec3* dev_image = NULL;
+static glm::vec3* dev_postimage = NULL;
 static Geom* dev_geoms = NULL;
 static LightGeom* dev_lightgeoms = NULL;
 static LinearBVHNode* dev_bvhnodes = NULL;
@@ -87,6 +88,9 @@ void pathtraceInit(Scene* scene)
 
     cudaMalloc(&dev_image, pixelcount * sizeof(glm::vec3));
     cudaMemset(dev_image, 0, pixelcount * sizeof(glm::vec3));
+
+    cudaMalloc(&dev_postimage, pixelcount * sizeof(glm::vec3));
+    cudaMemset(dev_postimage, 0, pixelcount * sizeof(glm::vec3));
 
     cudaMalloc(&dev_paths_A, pixelcount * sizeof(PathSegment));
     cudaMalloc(&dev_paths_B, pixelcount * sizeof(PathSegment));
@@ -141,6 +145,7 @@ void pathtraceInit(Scene* scene)
 void pathtraceFree()
 {
     cudaFree(dev_image);  // no-op if dev_image is null
+    cudaFree(dev_postimage);
     cudaFree(dev_paths_A);
     cudaFree(dev_paths_B);
     cudaFree(dev_geoms);
@@ -172,6 +177,7 @@ void pathtraceClear()
     const int pixelcount = cam.resolution.x * cam.resolution.y;
 
     cudaMemset(dev_image, 0, pixelcount * sizeof(glm::vec3));
+    cudaMemset(dev_postimage, 0, pixelcount * sizeof(glm::vec3));
     cudaMemset(dev_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
 
     checkCUDAError("pathtraceClear");
@@ -194,7 +200,7 @@ thrust::default_random_engine makeSeededRandomEngine(int iter, int index, int de
 
 
 //Kernel that writes the image to the OpenGL PBO directly.
-__global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution, int iter, glm::vec3* image, ColorGradingParams params)
+__global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution, int iter, glm::vec3* image, glm::vec3* postimage, ColorGradingParams params)
 {
     int x = (blockIdx.x * blockDim.x) + threadIdx.x;
     int y = (blockIdx.y * blockDim.y) + threadIdx.y;
@@ -206,6 +212,7 @@ __global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution, int iter, glm
 
         glm::vec3 avgcol = pix / (float)iter;
         glm::vec3 finalCol = gradeAndToneMap(avgcol, params);
+        postimage[index] = finalCol;
 
         glm::ivec3 color;
         color.x = glm::clamp((int)(finalCol.x * 255.0), 0, 255);
@@ -481,8 +488,6 @@ __global__ void shadeMaterial(
             thrust::default_random_engine rng = makeSeededRandomEngine(iter, segmentIdx, segment.remainingBounces);
             thrust::uniform_real_distribution<float> u01(0, 1);
 
-            Material& material = materials[intersection.materialId];
-
             // Hit Light
             if (intersection.materialId == -1)
             {
@@ -498,11 +503,17 @@ __global__ void shadeMaterial(
             // Otherwise, Hit Geom.
             else
             {
+                glm::vec3 shadingNormal = intersection.surfaceNormal;
+                Material material = materials[intersection.materialId];
+                getMatParams(material, intersection, shadingNormal, textureHandles);
                 glm::vec3 intersectPos = intersection.t * segment.ray.direction + segment.ray.origin;
+
+                // add material emission - not importance sampled 
+                segment.color += segment.throughput * material.emission;         
 #if MIS
-                directLight(bvhNodes, geoms, geoms_size, lightgeoms, lightgeoms_size, vertexPos, segment, intersectPos, intersection.surfaceNormal, material, rng);
+                directLight(bvhNodes, geoms, geoms_size, lightgeoms, lightgeoms_size, vertexPos, segment, intersectPos, shadingNormal, material, rng);
 #endif
-                Sample_f(segment, intersectPos, intersection.surfaceNormal, material, rng);
+                Sample_f(segment, intersectPos, shadingNormal, material, rng);
                 segment.remainingBounces--;
 
 #if RUSSIAN_ROULETTE
@@ -734,10 +745,10 @@ void pathtrace(uchar4* pbo, int frame, int iter)
     };
 
     // Send results to OpenGL buffer for rendering
-    sendImageToPBO << <blocksPerGrid2d, blockSize2d >> > (pbo, cam.resolution, iter, dev_image, postprocess_params);
+    sendImageToPBO << <blocksPerGrid2d, blockSize2d >> > (pbo, cam.resolution, iter, dev_image, dev_postimage, postprocess_params);
 
     // Retrieve image from GPU
-    cudaMemcpy(hst_scene->state.image.data(), dev_image,
+    cudaMemcpy(hst_scene->state.image.data(), dev_postimage,
         pixelcount * sizeof(glm::vec3), cudaMemcpyDeviceToHost);
 
     checkCUDAError("pathtrace");
