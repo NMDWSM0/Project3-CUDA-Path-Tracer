@@ -7,7 +7,9 @@
 #include <thrust/random.h>
 #include <thrust/remove.h>
 #include <thrust/sort.h>
+#include <OpenImageDenoise/oidn.hpp>
 
+#include "defines.h"
 #include "sceneStructs.h"
 #include "scene.h"
 #include "glm/glm.hpp"
@@ -18,11 +20,6 @@
 #include "postprocess.h"
 #include "../stream_compaction/efficient.h"
 
-#define ERRORCHECK 0
-#define MATERIAL_SORT 1
-#define RUSSIAN_ROULETTE 1
-#define MIS 1
-
 #define PACKINDEX(index, mat) (((index) << 4 ) | ((mat) & 0xF))
 #define UNPACKINDEX(packed) ((packed) >> 4)
 #define UNPACKMAT(packed) ((packed) & 0xF)
@@ -31,7 +28,7 @@
 #define checkCUDAError(msg) checkCUDAErrorFn(msg, FILENAME, __LINE__)
 void checkCUDAErrorFn(const char* msg, const char* file, int line)
 {
-#if ERRORCHECK
+#if PT_ERRORCHECK
     cudaDeviceSynchronize();
     cudaError_t err = cudaGetLastError();
     if (cudaSuccess == err)
@@ -49,29 +46,41 @@ void checkCUDAErrorFn(const char* msg, const char* file, int line)
     getchar();
 #endif // _WIN32
     exit(EXIT_FAILURE);
-#endif // ERRORCHECK
+#endif // PT_ERRORCHECK
 }
 
-static Scene* hst_scene = NULL;
-static GuiDataContainer* guiData = NULL;
-static glm::vec3* dev_image = NULL;
-static glm::vec3* dev_postimage = NULL;
-static Geom* dev_geoms = NULL;
-static LightGeom* dev_lightgeoms = NULL;
-static LinearBVHNode* dev_bvhnodes = NULL;
-static Material* dev_materials = NULL;
-static PathSegment* dev_paths_A = NULL;
-static PathSegment* dev_paths_B = NULL;
-static ShadeableIntersection* dev_intersections = NULL;
-// static variables for device memory, any extra info you need, etc
-static glm::vec3* dev_vertPos = NULL;
-static glm::vec3* dev_vertNor = NULL;
-static glm::vec2* dev_vertUV = NULL;
-static int* dev_pathremains = NULL;
-static int* dev_pathindices = NULL;
-static char* dev_mattypes = NULL;
-static cudaTextureObject_t* dev_texurehandles = NULL;
+// scene
+static Scene* hst_scene = nullptr;
+static GuiDataContainer* guiData = nullptr;
+// image & gbuffers
+static glm::vec3* dev_image = nullptr;
+static glm::vec3* dev_denoiseimage = nullptr;
+static glm::vec3* dev_postimage = nullptr;
+static glm::vec3* dev_GB_position = nullptr;
+static glm::vec3* dev_GB_albedo = nullptr;  // in linear space
+static glm::vec3* dev_GB_normal = nullptr;
+// geoms & bvhs
+static Geom* dev_geoms = nullptr;
+static LightGeom* dev_lightgeoms = nullptr;
+static LinearBVHNode* dev_bvhnodes = nullptr;
+static glm::vec3* dev_vertPos = nullptr;
+static glm::vec3* dev_vertNor = nullptr;
+static glm::vec2* dev_vertUV = nullptr;
+// mats & textures
+static Material* dev_materials = nullptr;
+static char* dev_mattypes = nullptr;
+static cudaTextureObject_t* dev_texurehandles = nullptr;
 static cudaTextureObject_t envmaphandle;
+// paths & isects
+static PathSegment* dev_paths_A = nullptr;
+static PathSegment* dev_paths_B = nullptr;
+static ShadeableIntersection* dev_intersections = nullptr;
+static int* dev_pathremains = nullptr;
+static int* dev_pathindices = nullptr;
+// oidn 
+static int oidn_deviceID = 0;
+static cudaStream_t oidn_stream = nullptr;
+static OIDNFilter oidn_filter = nullptr;
 
 void InitDataContainer(GuiDataContainer* imGuiData)
 {
@@ -89,8 +98,20 @@ void pathtraceInit(Scene* scene)
     cudaMalloc(&dev_image, pixelcount * sizeof(glm::vec3));
     cudaMemset(dev_image, 0, pixelcount * sizeof(glm::vec3));
 
+    cudaMalloc(&dev_denoiseimage, pixelcount * sizeof(glm::vec3));
+    cudaMemset(dev_denoiseimage, 0, pixelcount * sizeof(glm::vec3));
+
     cudaMalloc(&dev_postimage, pixelcount * sizeof(glm::vec3));
     cudaMemset(dev_postimage, 0, pixelcount * sizeof(glm::vec3));
+
+    cudaMalloc(&dev_GB_position, pixelcount * sizeof(glm::vec3));
+    cudaMemset(dev_GB_position, 0, pixelcount * sizeof(glm::vec3));
+
+    cudaMalloc(&dev_GB_albedo, pixelcount * sizeof(glm::vec3));
+    cudaMemset(dev_GB_albedo, 0, pixelcount * sizeof(glm::vec3));
+
+    cudaMalloc(&dev_GB_normal, pixelcount * sizeof(glm::vec3));
+    cudaMemset(dev_GB_normal, 0, pixelcount * sizeof(glm::vec3));
 
     cudaMalloc(&dev_paths_A, pixelcount * sizeof(PathSegment));
     cudaMalloc(&dev_paths_B, pixelcount * sizeof(PathSegment));
@@ -115,7 +136,6 @@ void pathtraceInit(Scene* scene)
     cudaMalloc(&dev_intersections, pixelcount * sizeof(ShadeableIntersection));
     cudaMemset(dev_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
 
-    //initialize any extra device memeory
     cudaMalloc(&dev_vertPos, scene->vertPos.size() * sizeof(glm::vec3));
     cudaMemcpy(dev_vertPos, scene->vertPos.data(), scene->vertPos.size() * sizeof(glm::vec3), cudaMemcpyHostToDevice);
 
@@ -139,13 +159,51 @@ void pathtraceInit(Scene* scene)
     // buffer size used for scan should be bigger
     StreamCompaction::EfficientSharedMem::initializeBuffers(pixelcount_pot);
 
+    // init oidn
+    OIDNDevice dev = oidnNewCUDADevice(&oidn_deviceID, &oidn_stream, 1);
+    oidnCommitDevice(dev);
+    oidn_filter = oidnNewFilter(dev, "RT");
+
+    oidnSetSharedFilterImage(oidn_filter, "color",
+        dev_image, OIDN_FORMAT_FLOAT3, cam.resolution.x, cam.resolution.y,
+        0,                                      /*byteOffset*/
+        sizeof(glm::vec3),                      /*pixelByteStride*/
+        sizeof(glm::vec3) * cam.resolution.x);  /*rowByteStride*/
+    oidnSetSharedFilterImage(oidn_filter, "albedo", 
+        dev_GB_albedo, OIDN_FORMAT_FLOAT3, cam.resolution.x, cam.resolution.y,
+        0,
+        sizeof(glm::vec3),
+        sizeof(glm::vec3) * cam.resolution.x);
+    oidnSetSharedFilterImage(oidn_filter, "normal",
+        dev_GB_normal, OIDN_FORMAT_FLOAT3, cam.resolution.x, cam.resolution.y,
+        0,
+        sizeof(glm::vec3),
+        sizeof(glm::vec3) * cam.resolution.x);
+    oidnSetSharedFilterImage(oidn_filter, "output",
+        dev_denoiseimage, OIDN_FORMAT_FLOAT3, cam.resolution.x, cam.resolution.y,
+        0,
+        sizeof(glm::vec3),
+        sizeof(glm::vec3) * cam.resolution.x);
+    // use linear HDR color to denoise
+    oidnSetFilterBool(oidn_filter, "hdr", true);
+#if PT_REALTIME_DENOISE
+    oidnSetFilterInt(oidn_filter, "quality", OIDN_QUALITY_FAST);
+#else
+    oidnSetFilterInt(oidn_filter, "quality", OIDN_QUALITY_HIGH);
+#endif // PT_REALTIME_DENOISE
+    oidnCommitFilter(oidn_filter);
+
     checkCUDAError("pathtraceInit");
 }
 
 void pathtraceFree()
 {
     cudaFree(dev_image);  // no-op if dev_image is null
+    cudaFree(dev_denoiseimage);
     cudaFree(dev_postimage);
+    cudaFree(dev_GB_position);
+    cudaFree(dev_GB_albedo);
+    cudaFree(dev_GB_normal);
     cudaFree(dev_paths_A);
     cudaFree(dev_paths_B);
     cudaFree(dev_geoms);
@@ -177,7 +235,11 @@ void pathtraceClear()
     const int pixelcount = cam.resolution.x * cam.resolution.y;
 
     cudaMemset(dev_image, 0, pixelcount * sizeof(glm::vec3));
+    cudaMemset(dev_denoiseimage, 0, pixelcount * sizeof(glm::vec3));
     cudaMemset(dev_postimage, 0, pixelcount * sizeof(glm::vec3));
+    cudaMemset(dev_GB_position, 0, pixelcount * sizeof(glm::vec3));
+    cudaMemset(dev_GB_albedo, 0, pixelcount * sizeof(glm::vec3));
+    cudaMemset(dev_GB_normal, 0, pixelcount * sizeof(glm::vec3));
     cudaMemset(dev_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
 
     checkCUDAError("pathtraceClear");
@@ -210,8 +272,8 @@ __global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution, int iter, glm
         int index = x + (y * resolution.x);
         glm::vec3 pix = image[index];
 
-        glm::vec3 avgcol = pix / (float)iter;
-        glm::vec3 finalCol = gradeAndToneMap(avgcol, params);
+        //glm::vec3 avgcol = pix / (float)iter;
+        glm::vec3 finalCol = gradeAndToneMap(pix, params);
         postimage[index] = finalCol;
 
         glm::ivec3 color;
@@ -227,6 +289,28 @@ __global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution, int iter, glm
     }
 }
 
+
+__global__ void generateGBufferRayFromCamera(Camera cam, PathSegment* pathSegments)
+{
+    int x = (blockIdx.x * blockDim.x) + threadIdx.x;
+    int y = (blockIdx.y * blockDim.y) + threadIdx.y;
+    if (x < cam.resolution.x && y < cam.resolution.y) {
+        int index = x + (y * cam.resolution.x);
+        PathSegment& segment = pathSegments[index];
+
+        segment.ray.origin = cam.position;
+        segment.throughput = glm::vec3(1.0f);
+        segment.color = glm::vec3(0.f);
+
+        segment.ray.direction = glm::normalize(cam.view
+            - cam.right * cam.pixelLength.x * ((float)x - (float)cam.resolution.x * 0.5f)
+            - cam.up * cam.pixelLength.y * ((float)y - (float)cam.resolution.y * 0.5f)
+        );
+
+        segment.pixelIndex = index;
+        segment.remainingBounces = 1;
+    }
+}
 
 /**
 * Generate PathSegments with rays from the camera through the screen into the
@@ -252,11 +336,31 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
         segment.throughput = glm::vec3(1.0f);
         segment.color = glm::vec3(0.f);
 
-        // antialiasing by jittering the ray
         segment.ray.direction = glm::normalize(cam.view
-            - cam.right * cam.pixelLength.x * ((float)x - (float)cam.resolution.x * 0.5f + (u01(rng) - 0.5f))
-            - cam.up * cam.pixelLength.y * ((float)y - (float)cam.resolution.y * 0.5f + (u01(rng) - 0.5f))
+            - cam.right * cam.pixelLength.x * ((float)x - (float)cam.resolution.x * 0.5f)
+            - cam.up * cam.pixelLength.y * ((float)y - (float)cam.resolution.y * 0.5f)
         );
+
+#if PT_DOF
+        glm::vec3 focusPoint = cam.position + cam.focalLength * segment.ray.direction;
+        // sample on len circle
+        float rad = sqrtf(u01(rng)) * cam.lenRadius;
+        float theta = TWO_PI * u01(rng);
+        float lensSampleX = rad * cos(theta);
+        float lensSampleY = rad * sin(theta);
+        glm::vec3 offset = cam.right * lensSampleX + cam.up * lensSampleY;
+        segment.ray.origin = cam.position + offset;
+        segment.ray.direction = glm::normalize(focusPoint - segment.ray.origin);
+#endif // PT_DOF
+
+#if PT_AA
+        // antialiasing by jittering the ray
+        segment.ray.direction += (
+            cam.right * cam.pixelLength.x * (u01(rng) - 0.5f) +
+            cam.up * cam.pixelLength.y * (u01(rng) - 0.5f)
+        );
+        segment.ray.direction = glm::normalize(segment.ray.direction);
+#endif // PT_AA
 
         segment.pixelIndex = index;
         segment.remainingBounces = traceDepth;
@@ -264,7 +368,7 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
 }
 
 
-#if MATERIAL_SORT
+#if PT_MATERIAL_SORT
 __global__ void computeIntersections(
     int iter,
     int depth,
@@ -295,22 +399,22 @@ __global__ void computeIntersections(
     glm::vec3* vertexNor,
     glm::vec2* vertexUV,
     ShadeableIntersection* intersections)
-#endif // MATERIAL_SORT
+#endif // PT_MATERIAL_SORT
 {
     int path_index = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (path_index < num_paths)
     {
-#if MATERIAL_SORT
-#if RUSSIAN_ROULETTE
+#if PT_MATERIAL_SORT
+#if PT_RUSSIAN_ROULETTE
         // compute rr prob eariler
         glm::vec3 throughput = pathSegments[path_index].throughput;
         float q = fminf(fmaxf(throughput.r, fmaxf(throughput.g, throughput.b)) + 0.001f, 0.95f);
         thrust::default_random_engine rng = makeSeededRandomEngine(iter, path_index, depth);
         thrust::uniform_real_distribution<float> u01(0, 1);
         float rand = u01(rng);
-#endif // RUSSIAN_ROULETTE
-#endif // MATERIAL_SORT
+#endif // PT_RUSSIAN_ROULETTE
+#endif // PT_MATERIAL_SORT
 
         Ray ray = pathSegments[path_index].ray;
         ShadeableIntersection isect;
@@ -322,7 +426,7 @@ __global__ void computeIntersections(
             hit = getClosestHit(ray, bvhNodes, geoms, geoms_size, lightgeoms, lightgeoms_size, vertexPos, vertexNor, vertexUV, isect);
         }
 
-#if MATERIAL_SORT
+#if PT_MATERIAL_SORT
         if (!hit)
         {
             intersections[path_index].t = -1.0f;
@@ -334,12 +438,12 @@ __global__ void computeIntersections(
             intersections[path_index] = isect;
             // write mat type, considering rr, paths to terminate will flag their mat type with TER_
             char mattype = isect.materialId >= 0 ? mattypes[isect.materialId] : LIGHT;
-#if RUSSIAN_ROULETTE
+#if PT_RUSSIAN_ROULETTE
             constexpr char TER_OFFSET = DIFFUSE - TER_DIFFUSE;
             if (rand > q && mattype != LIGHT) {
                 mattype += TER_OFFSET;
             }
-#endif // RUSSIAN_ROULETTE
+#endif // PT_RUSSIAN_ROULETTE
             pathIndices[path_index] = PACKINDEX(path_index, mattype);
         }
 #else
@@ -352,76 +456,92 @@ __global__ void computeIntersections(
             // The ray hits something
             intersections[path_index] = isect;
         }
-#endif // MATERIAL_SORT
+#endif // PT_MATERIAL_SORT
     }
 }
 
-#if MATERIAL_SORT
-__global__ void shadeFakeMaterial(
-    int iter,
-    int depth,
+
+__global__ void computeGBufferIntersections(
     int num_paths,
-    ShadeableIntersection* shadeableIntersections,
     PathSegment* pathSegments,
-    PathSegment* out_pathSegments,
-    int* pathIndices,
     LinearBVHNode* bvhNodes,
     Geom* geoms,
     int geoms_size,
     LightGeom* lightgeoms,
     int lightgeoms_size,
     glm::vec3* vertexPos,
-    Material* materials)
-#else
-__global__ void shadeFakeMaterial(
-    int iter,
-    int depth,
+    glm::vec3* vertexNor,
+    glm::vec2* vertexUV,
+    ShadeableIntersection* intersections)
+{
+    int path_index = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (path_index < num_paths)
+    {
+        Ray ray = pathSegments[path_index].ray;
+        ShadeableIntersection isect;
+        bool hit = getClosestHit(ray, bvhNodes, geoms, geoms_size, lightgeoms, lightgeoms_size, vertexPos, vertexNor, vertexUV, isect);
+
+        if (!hit)
+        {
+            intersections[path_index].t = -1.0f;
+        }
+        else
+        {
+            intersections[path_index] = isect;
+        }
+    }
+}
+
+__global__ void shadeGBufferMaterial(
     int num_paths,
-    ShadeableIntersection* shadeableIntersections,
     PathSegment* pathSegments,
-    int* bPathRemains,
-    LinearBVHNode* bvhNodes,
-    Geom* geoms,
-    int geoms_size,
-    LightGeom* lightgeoms,
-    int lightgeoms_size,
-    glm::vec3* vertexPos,
-    Material* materials)
-#endif // MATERIAL_SORT 
+    ShadeableIntersection* shadeableIntersections,
+    Material* materials,
+    cudaTextureObject_t* textureHandles,
+    glm::vec3* gbufferPosition,
+    glm::vec3* gbufferAlbedo,
+    glm::vec3* gbufferNormal)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= num_paths) {
         return;
     }
+    PathSegment& segment = pathSegments[idx];
+    ShadeableIntersection& intersection = shadeableIntersections[idx];
+    int pixelIndex = segment.pixelIndex;
+    glm::vec3 pos;
+    glm::vec3 albedo;
+    glm::vec3 nor;
+    if (intersection.t > 0.0f) {
+        glm::vec3 intersectPos = intersection.t * segment.ray.direction + segment.ray.origin;
+        pos = intersectPos;
+        if (intersection.materialId == -1)
+        {
+            albedo = intersection.lightEmission;
+            nor = -segment.ray.direction;
+        }
+        else {
+            glm::vec3 shadingNormal = intersection.surfaceNormal;
+            Material material = materials[intersection.materialId];
+            getMatParams(material, intersection, shadingNormal, textureHandles);
 
-#if MATERIAL_SORT
-    int packedIndex = pathIndices[idx];
-    int segmentIdx = UNPACKINDEX(packedIndex);
-    int mattype = UNPACKMAT(packedIndex);
-#else
-    int segmentIdx = idx;
-#endif // MATERIAL_SORT
-
-    PathSegment segment = pathSegments[segmentIdx];
-    ShadeableIntersection& intersection = shadeableIntersections[segmentIdx];
-    // normal
-    segment.color = intersection.surfaceNormal * 0.5f + 0.5f;
-    // UV
-    //segment.color = glm::vec3(intersection.texCoord, 0.0f);
-    // pos (default cornell box size)
-    //segment.color = (intersection.t * segment.ray.direction + segment.ray.origin) * 0.1f + glm::vec3(0.5f, 0.f, 0.5f);
-    segment.remainingBounces = -1;
-
-#if MATERIAL_SORT
-    out_pathSegments[idx] = segment;
-#else
-    bPathRemains[idx] = segment.remainingBounces > 0;
-    pathSegments[idx] = segment;
-#endif
+            albedo = material.color;
+            nor = shadingNormal;
+        }
+    }
+    else {
+        pos = 1000000.f * segment.ray.direction + segment.ray.origin;
+        albedo = glm::vec3(0.f);
+        nor = glm::vec3(0.f);
+    }
+    gbufferPosition[pixelIndex] = pos;
+    gbufferAlbedo[pixelIndex] = albedo;
+    gbufferNormal[pixelIndex] = nor;
 }
 
 
-#if MATERIAL_SORT
+#if PT_MATERIAL_SORT
 __global__ void shadeMaterial(
     int iter,
     int depth, 
@@ -456,7 +576,7 @@ __global__ void shadeMaterial(
     Material* materials,
     cudaTextureObject_t* textureHandles,
     cudaTextureObject_t envmapHandle)
-#endif // MATERIAL_SORT
+#endif // PT_MATERIAL_SORT
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= num_paths) {
@@ -464,20 +584,20 @@ __global__ void shadeMaterial(
     }
 
     // this is not a reference, just for reading, not writing
-#if MATERIAL_SORT
+#if PT_MATERIAL_SORT
     int packedIndex = pathIndices[idx];
     int segmentIdx = UNPACKINDEX(packedIndex);
     int mattype = UNPACKMAT(packedIndex);
 #else
     int segmentIdx = idx;
-#endif // MATERIAL_SORT
+#endif // PT_MATERIAL_SORT
 
     PathSegment segment = pathSegments[segmentIdx];
-#if MATERIAL_SORT
-#if RUSSIAN_ROULETTE
+#if PT_MATERIAL_SORT
+#if PT_RUSSIAN_ROULETTE
     float q = fminf(fmaxf(segment.throughput.r, fmaxf(segment.throughput.g, segment.throughput.b)) + 0.001f, 0.95f);
-#endif // RUSSIAN_ROULETTE
-#endif // MATERIAL_SORT
+#endif // PT_RUSSIAN_ROULETTE
+#endif // PT_MATERIAL_SORT
     if (segment.remainingBounces > 0) {
         ShadeableIntersection intersection = shadeableIntersections[segmentIdx];
         if (intersection.t > 0.0f) // if the intersection exists...
@@ -492,11 +612,11 @@ __global__ void shadeMaterial(
             if (intersection.materialId == -1)
             {
                 float misWeight = 1.f;
-#if MIS
+#if PT_MIS
                 if (depth > 0 && segment.pdf < INFINITY) {
                     misWeight = powerHeuristic(segment.pdf, intersection.pdf_Li);
                 }
-#endif
+#endif // PT_MIS
                 segment.color += misWeight * segment.throughput * intersection.lightEmission;
                 segment.remainingBounces = -1;
             }
@@ -510,14 +630,14 @@ __global__ void shadeMaterial(
 
                 // add material emission - not importance sampled 
                 segment.color += segment.throughput * material.emission;         
-#if MIS
+#if PT_MIS
                 directLight(bvhNodes, geoms, geoms_size, lightgeoms, lightgeoms_size, vertexPos, segment, intersectPos, shadingNormal, material, rng);
-#endif
+#endif // PT_MIS
                 Sample_f(segment, intersectPos, shadingNormal, material, rng);
                 segment.remainingBounces--;
 
-#if RUSSIAN_ROULETTE
-#if !MATERIAL_SORT
+#if PT_RUSSIAN_ROULETTE
+#if !PT_MATERIAL_SORT
                 float q = fminf(fmaxf(segment.throughput.r, fmaxf(segment.throughput.g, segment.throughput.b)) + 0.001f, 0.95f);
                 float rand = u01(rng);
                 if (rand > q) {
@@ -525,11 +645,11 @@ __global__ void shadeMaterial(
                 }
 #else
                 if (mattype < TER_DIFFUSE)
-#endif // !MATERIAL_SORT
+#endif // !PT_MATERIAL_SORT
                 {
                     segment.throughput /= q;
                 }
-#endif // RUSSIAN_ROULETTE
+#endif // PT_RUSSIAN_ROULETTE
             }
             // If there was no intersection, color the ray black.
             // Lots of renderers use 4 channel color, RGBA, where A = alpha, often
@@ -546,23 +666,29 @@ __global__ void shadeMaterial(
         }
     }
 
-#if MATERIAL_SORT
+#if PT_MATERIAL_SORT
     out_pathSegments[idx] = segment;
 #else
     bPathRemains[idx] = segment.remainingBounces > 0;
     pathSegments[idx] = segment;
-#endif // MATERIAL_SORT
+#endif // PT_MATERIAL_SORT
 }
 
 // Add the current iteration's output to the overall image
-__global__ void finalGather(int nPaths, glm::vec3* image, PathSegment* iterationPaths)
+__global__ void finalGather(int nPaths, glm::vec3* image, PathSegment* iterationPaths, int iter)
 {
     int index = (blockIdx.x * blockDim.x) + threadIdx.x;
 
     if (index < nPaths)
     {
         PathSegment iterationPath = iterationPaths[index];
-        image[iterationPath.pixelIndex] += iterationPath.color;
+        if (iter == 0) {
+            image[iterationPath.pixelIndex] += iterationPath.color;
+        }
+        else {
+            float alpha = 1.f / (float)iter;
+            image[iterationPath.pixelIndex] = glm::mix(image[iterationPath.pixelIndex], iterationPath.color, alpha);
+        }
     }
 }
 
@@ -570,7 +696,7 @@ __global__ void finalGather(int nPaths, glm::vec3* image, PathSegment* iteration
  * Wrapper for the __global__ call that sets up the kernel calls and does a ton
  * of memory management
  */
-void pathtrace(uchar4* pbo, int frame, int iter)
+void pathtrace(uchar4* pbo, int maxiter, int iter)
 {
     const int traceDepth = hst_scene->state.traceDepth;
     const Camera& cam = hst_scene->state.camera;
@@ -610,7 +736,7 @@ void pathtrace(uchar4* pbo, int frame, int iter)
 
         // tracing
         dim3 numblocksPathSegmentTracing = (num_paths + blockSize1d - 1) / blockSize1d;
-#if MATERIAL_SORT
+#if PT_MATERIAL_SORT
         computeIntersections << <numblocksPathSegmentTracing, blockSize1d >> > (
             iter,
             depth,
@@ -643,14 +769,14 @@ void pathtrace(uchar4* pbo, int frame, int iter)
             dev_vertUV,
             dev_intersections
             );
-#endif // MATERIAL_SORT
+#endif // PT_MATERIAL_SORT
         checkCUDAError("trace one bounce");
         cudaDeviceSynchronize();
 
         // --- Shading Stage ---
         // Shade path segments based on intersections and generate new rays by
         // evaluating the BSDF.
-#if MATERIAL_SORT
+#if PT_MATERIAL_SORT
         // Mat sort and compaction at one pass
         // Save mem load/store times
         int remain_num_paths = StreamCompaction::EfficientSharedMem::radixSortMatTypeCUB(num_paths, dev_pathindices, dev_pathindices);
@@ -703,7 +829,7 @@ void pathtrace(uchar4* pbo, int frame, int iter)
         }
         // Stream Compaction
         int remain_num_paths = StreamCompaction::EfficientSharedMem::partitionStable(num_paths, sizeof(PathSegment), dev_paths_next, dev_paths, dev_pathremains);
-#endif // MATERIAL_SORT
+#endif // PT_MATERIAL_SORT
         cudaDeviceSynchronize();
 
         last_num_paths = num_paths;
@@ -720,11 +846,11 @@ void pathtrace(uchar4* pbo, int frame, int iter)
 
     // Assemble this iteration and apply it to the image
     dim3 numBlocksPixels = (pixelcount + blockSize1d - 1) / blockSize1d;
-#if MATERIAL_SORT
-    finalGather << <numBlocksPixels, blockSize1d >> > (pixelcount, dev_image, dev_paths_next);
+#if PT_MATERIAL_SORT
+    finalGather << <numBlocksPixels, blockSize1d >> > (pixelcount, dev_image, dev_paths_next, iter);
 #else
-    finalGather << <numBlocksPixels, blockSize1d >> > (pixelcount, dev_image, dev_paths);
-#endif // MATERIAL_SORT
+    finalGather << <numBlocksPixels, blockSize1d >> > (pixelcount, dev_image, dev_paths, iter);
+#endif // PT_MATERIAL_SORT
     ///////////////////////////////////////////////////////////////////////////
 
     ColorGradingParams postprocess_params{
@@ -744,12 +870,87 @@ void pathtrace(uchar4* pbo, int frame, int iter)
         glm::vec3(1.0f)
     };
 
-    // Send results to OpenGL buffer for rendering
+#if PT_DENOISE
+#if PT_REALTIME_DENOISE
+    if (iter == maxiter) {
+        oidnSetFilterInt(oidn_filter, "quality", OIDN_QUALITY_HIGH);
+        oidnCommitFilter(oidn_filter);
+    }
+    oidnExecuteFilter(oidn_filter);
+    sendImageToPBO << <blocksPerGrid2d, blockSize2d >> > (pbo, cam.resolution, iter, dev_denoiseimage, dev_postimage, postprocess_params);
+#else 
+    if (iter == maxiter) {
+        oidnExecuteFilter(oidn_filter);
+        sendImageToPBO << <blocksPerGrid2d, blockSize2d >> > (pbo, cam.resolution, iter, dev_denoiseimage, dev_postimage, postprocess_params);
+    }
+    else {
+        sendImageToPBO << <blocksPerGrid2d, blockSize2d >> > (pbo, cam.resolution, iter, dev_image, dev_postimage, postprocess_params);
+    }
+#endif // PT_REALTIME_DENOISE
+#else
     sendImageToPBO << <blocksPerGrid2d, blockSize2d >> > (pbo, cam.resolution, iter, dev_image, dev_postimage, postprocess_params);
+#endif // PT_DENOISE
 
     // Retrieve image from GPU
     cudaMemcpy(hst_scene->state.image.data(), dev_postimage,
         pixelcount * sizeof(glm::vec3), cudaMemcpyDeviceToHost);
 
     checkCUDAError("pathtrace");
+}
+
+void pathtraceGetGBuffer()
+{
+    const Camera& cam = hst_scene->state.camera;
+    const int pixelcount = cam.resolution.x * cam.resolution.y;
+
+    // 2D block for generating ray from camera
+    constexpr dim3 blockSize2d(8, 8);
+    const dim3 blocksPerGrid2d(
+        (cam.resolution.x + blockSize2d.x - 1) / blockSize2d.x,
+        (cam.resolution.y + blockSize2d.y - 1) / blockSize2d.y);
+
+    // 1D block for path tracing
+    constexpr int blockSize1d = 128;
+
+    ///////////////////////////////////////////////////////////////////////////
+   // Start Tracing
+   // Generate rays first
+    generateGBufferRayFromCamera << <blocksPerGrid2d, blockSize2d >> > (cam, dev_paths_A);
+    checkCUDAError("generate camera ray");
+
+    int depth = 0;
+    PathSegment* dev_path_end = dev_paths_A + pixelcount;
+    int num_paths = dev_path_end - dev_paths_A;
+    int last_num_paths = num_paths;
+
+    // clean shading chunks
+    cudaMemset(dev_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
+
+    // trace one
+    dim3 numblocksPathSegmentTracing = (num_paths + blockSize1d - 1) / blockSize1d;
+
+    computeGBufferIntersections << <numblocksPathSegmentTracing, blockSize1d >> > (
+        num_paths,
+        dev_paths_A,
+        dev_bvhnodes,
+        dev_geoms,
+        hst_scene->geoms.size(),
+        dev_lightgeoms,
+        hst_scene->lightgeoms.size(),
+        dev_vertPos,
+        dev_vertNor,
+        dev_vertUV,
+        dev_intersections);
+    cudaDeviceSynchronize();
+    shadeGBufferMaterial << <numblocksPathSegmentTracing, blockSize1d >> > (
+        num_paths,
+        dev_paths_A,
+        dev_intersections,
+        dev_materials,
+        dev_texurehandles,
+        dev_GB_position,
+        dev_GB_albedo,
+        dev_GB_normal);
+
+    checkCUDAError("gbuffer");
 }

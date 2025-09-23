@@ -409,7 +409,7 @@ void saveImage()
         {
             int index = x + (y * width);
             glm::vec3 pix = renderState->image[index];
-            img.setPixel(width - 1 - x, y, glm::vec3(pix)/* / samples*/); // we device this in cuda side when postprocessing 
+            img.setPixel(width - 1 - x, y, glm::vec3(pix)/* / samples*/); // we device this in gathering
         }
     }
 
@@ -452,6 +452,7 @@ void runCuda()
     if (iteration == 0)
     {
         pathtraceClear();
+        pathtraceGetGBuffer();
     }
 
     if (iteration < renderState->iterations)
@@ -461,8 +462,7 @@ void runCuda()
         cudaGLMapBufferObject((void**)&pbo_dptr, pbo);
 
         // execute the kernel
-        int frame = 0;
-        pathtrace(pbo_dptr, frame, iteration);
+        pathtrace(pbo_dptr, renderState->iterations, iteration);
 
         // unmap buffer object
         cudaGLUnmapBufferObject(pbo);

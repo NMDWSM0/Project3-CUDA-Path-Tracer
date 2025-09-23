@@ -1,7 +1,6 @@
 #include "bvh.h"
+#include "defines.h"
 // BVH build from, https://www.pbr-book.org/4ed/Primitives_and_Intersection_Acceleration/Bounding_Volume_Hierarchies
-
-#define PRINT_BUILD_INFO
 
 struct BVHPrimitiveInfo {
     BVHPrimitiveInfo() {}
@@ -60,7 +59,7 @@ BVHAccel::BVHAccel(std::vector<std::shared_ptr<Primitive>>& p, int maxPrimsInNod
     primitives.swap(orderedPrims);
     primitiveInfo.resize(0);
 
-#ifdef PRINT_BUILD_INFO
+#if BVH_PRINT_BUILD_INFO
     printf("BVH created with %d nodes for %d "
         "primitives (%.2f MB)\n",
         totalNodes, (int)primitives.size(),

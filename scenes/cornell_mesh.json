@@ -38,7 +38,9 @@
         "FILE": "cornell",
         "EYE": [0.0, 5.0, 17.0],
         "LOOKAT": [0.0, 5.0, 0.0],
-        "UP": [0.0, 1.0, 0.0]
+        "UP": [0.0, 1.0, 0.0],
+        "FOCALLENGTH": 16.8,
+        "LENRADIUS": 0.4
     },
     "EnvMap": {
         "PATH": "./14-Hamarikyu_Bridge_B_3k.hdr"

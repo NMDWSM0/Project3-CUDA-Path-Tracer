@@ -1,7 +1,6 @@
+#include "defines.h"
 #include "intersections.h"
 #include "utilities.h"
-
-#define BVH 1
 
 __host__ __device__ float AABBIntersect(glm::vec3 minCorner, glm::vec3 maxCorner, const Ray& r)
 {
@@ -132,7 +131,7 @@ __host__ __device__ bool getAnyHit(
     // check meshes, if distance smaller than light source than override it
     glm::vec3 barycentricParameters;
     glm::ivec3 vertIds;
-#if BVH
+#if PT_USEBVH
     // traversal stack
     int stack[64];
     int ptr = 0;
@@ -220,7 +219,7 @@ __host__ __device__ bool getAnyHit(
             return true;
         }
     }
-#endif
+#endif // PT_USEBVH
     // No intersections before maxt
     return false;
 }
@@ -289,7 +288,7 @@ __host__ __device__ bool getClosestHit(
     glm::vec3 barycentricParameters;
     glm::ivec3 vertIds;
     glm::vec3 vp0, vp1, vp2, center;
-#if BVH
+#if PT_USEBVH
     // traversal stack
     int stack[64];
     int ptr = 0;
@@ -411,7 +410,7 @@ __host__ __device__ bool getClosestHit(
             center = temp_center;
         }
     }
-#endif
+#endif // PT_USEBVH
 
     // No intersections
     if (t == INFINITY)

@@ -14,6 +14,8 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CUDA_STANDARD 17)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
+list(APPEND CMAKE_PREFIX_PATH "${CMAKE_SOURCE_DIR}/external/lib/cmake/OpenImageDenoise-2.3.3")
+
 # Set a default build type if none was specified
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     SET(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build." FORCE)
@@ -22,6 +24,7 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 endif()
 
 find_package(OpenGL REQUIRED)
+find_package(OpenImageDenoise 2 REQUIRED CONFIG)
 
 if(UNIX)
     include_directories("${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES}")
@@ -50,6 +53,7 @@ include_directories(${GLM_INCLUDE_DIRS})
 find_package(CCCL REQUIRED)
 
 set(headers
+    src/defines.h
     src/image.h
     src/interactions.h
     src/intersections.h
@@ -119,6 +123,7 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
     cudadevrt
     CCCL::Thrust
     stream_compaction 
+    OpenImageDenoise
 )
 set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES CUDA_ARCHITECTURES native)
@@ -128,3 +133,11 @@ target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE "$<$<AND:$<CONFIG:Release>,
 
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT ${CMAKE_PROJECT_NAME})
 
+# copy dlls
+file(GLOB OIDN_DLLS "${CMAKE_SOURCE_DIR}/external/bin/*.dll")
+foreach(DLL ${OIDN_DLLS})
+    add_custom_command(TARGET ${CMAKE_PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${DLL}
+            ${CMAKE_BINARY_DIR})
+endforeach()
