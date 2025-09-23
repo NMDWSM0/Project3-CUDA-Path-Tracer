@@ -72,9 +72,9 @@ __host__ __device__ float TriangleIntersect(glm::vec3 v0, glm::vec3 v1, glm::vec
     glm::vec3 tv = r.origin - v0;
     glm::vec3 qv = glm::cross(tv, e0);
 
-    bary.x = glm::dot(tv, pv) / det;
-    bary.y = glm::dot(r.direction, qv) / det;
-    bary.z = 1.0 - bary.x - bary.y;
+    bary.y = glm::dot(tv, pv) / det;
+    bary.z = glm::dot(r.direction, qv) / det;
+    bary.x = 1.0 - bary.y - bary.z;
     float t = glm::dot(e1, qv) / det;
     
     if (bary.x >= 0 && bary.y >= 0 && bary.z >= 0 && t >= 0) {

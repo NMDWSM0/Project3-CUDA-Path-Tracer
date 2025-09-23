@@ -37,6 +37,16 @@ void Texture::loadToCPU(const std::string& filename)
         cpudata.resize(w * h * 4 * sizeof(unsigned char));
         memcpy(cpudata.data(), pixels, w * h * 4 * sizeof(unsigned char));
     }
+    c = 4;
+}
+
+void Texture::loadToCPU(unsigned char* data, int w, int h, int c) 
+{
+    this->w = w; this->h = h; this->c = c;
+    // should be 4-channel uchar since we are using customed gltf image loading function
+    cpudata.resize(w * h * 4 * sizeof(unsigned char));
+    memcpy(cpudata.data(), data, w * h * 4 * sizeof(unsigned char));
+    c = 4;
 }
 
 cudaTextureObject_t Texture::loadToCuda() 

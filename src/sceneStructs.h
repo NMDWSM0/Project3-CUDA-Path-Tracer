@@ -105,8 +105,12 @@ struct Material
     float clearcoat;
     float coatroughness;
     float subsurface;
+    int baseColorTexId;
+    int metallicRoughnessTexId;
+    int normalmapTexId;
+    int emissionmapTexId;
 
-    __host__ __device__ Material() = default;
+    __host__ __device__ Material() : type(DIFFUSE), color(1.f), baseColorTexId(-1), metallicRoughnessTexId(-1), normalmapTexId(-1), emissionmapTexId(-1) {};
 
     __host__ __device__ Material(const Material& other) {
         std::memcpy(this, &other, sizeof(Material));
@@ -130,10 +134,13 @@ struct Texture
     int w = 0, h = 0, c = 0;
     bool isHDR = false;
 
+    // for loading from file
     void loadToCPU(const std::string& filename);
+    // for model loader who loads textures directly into memory
+    void loadToCPU(unsigned char* data, int w, int h, int c);
 
     cudaTextureObject_t loadToCuda();
-    // Texture(unsigned char* data); for model loader who loads textures directly into memory
+    // Texture(unsigned char* data); 
 
     void FreeCudaSide();
 

@@ -1,8 +1,12 @@
 #include "scene.h"
+#define TINYGLTF_IMPLEMENTATION
 
 #include "utilities.h"
 #include "postprocess.h"
 
+#include <glm/gtc/quaternion.hpp>
+#include <glm/gtc/type_ptr.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtx/string_cast.hpp>
 #include "json.hpp"
@@ -11,6 +15,8 @@
 #include <iostream>
 #include <string>
 #include <unordered_map>
+#include <stb_image.h>
+#include <tiny_gltf.h>
 
 using namespace std;
 using json = nlohmann::json;
@@ -30,6 +36,363 @@ Scene::Scene(string filename)
         cout << "Couldn't read from " << filename << endl;
         exit(-1);
     }
+}
+
+static inline glm::mat4 LocalOf(const tinygltf::Node& n) {
+    if (n.matrix.size() == 16) {
+        return glm::make_mat4(reinterpret_cast<const float*>(n.matrix.data()));
+    }
+    glm::vec3 T(0.0f), S(1.0f);
+    glm::quat R(1, 0, 0, 0); // w,x,y,z
+    if (n.translation.size() == 3) 
+        T = { (float)n.translation[0], (float)n.translation[1], (float)n.translation[2] };
+    if (n.scale.size() == 3)      
+        S = { (float)n.scale[0], (float)n.scale[1], (float)n.scale[2] };
+    if (n.rotation.size() == 4)    
+        R = glm::quat((float)n.rotation[3], (float)n.rotation[0], (float)n.rotation[1], (float)n.rotation[2]);
+    return glm::translate(glm::mat4(1.0f), T) * glm::mat4_cast(R) * glm::scale(glm::mat4(1.0f), S); // T*R*S
+}
+
+static struct MeshInstance {
+    int node = -1;
+    int mesh = -1;
+    glm::mat4 world{ 1.0f };
+};
+
+static void DFS(const tinygltf::Model& m, int ni, const glm::mat4& parent, std::vector<MeshInstance>& out) {
+    const auto& n = m.nodes[ni];
+    glm::mat4 world = parent * LocalOf(n);
+    if (n.mesh >= 0) 
+        out.push_back({ ni, n.mesh, world });
+    for (int c : n.children) 
+        DFS(m, c, world, out);
+}
+
+static std::vector<MeshInstance> CollectInstancesOneScene(const tinygltf::Model& model) {
+    std::vector<MeshInstance> inst;
+    const int s = (model.defaultScene >= 0) ? model.defaultScene : 0;
+    for (int root : model.scenes[s].nodes) 
+        DFS(model, root, glm::mat4(1.0f), inst);
+    return inst;
+}
+
+static void loadMeshes(Scene* scene, tinygltf::Model& gltfModel, const glm::mat4& inputTransform)
+{
+    glm::mat3 normalTransform = glm::inverseTranspose(glm::mat3(inputTransform));
+    for (int gltfMeshIdx = 0; gltfMeshIdx < gltfModel.meshes.size(); gltfMeshIdx++)
+    {
+        tinygltf::Mesh gltfMesh = gltfModel.meshes[gltfMeshIdx];
+
+        for (int gltfPrimIdx = 0; gltfPrimIdx < gltfMesh.primitives.size(); gltfPrimIdx++)
+        {
+            tinygltf::Primitive prim = gltfMesh.primitives[gltfPrimIdx];
+
+            // Skip points and lines
+            if (prim.mode != TINYGLTF_MODE_TRIANGLES)
+                continue;
+
+            int indicesIndex = prim.indices;
+            int positionIndex = -1;
+            int normalIndex = -1;
+            int uv0Index = -1;
+
+            if (prim.attributes.count("POSITION") > 0)
+            {
+                positionIndex = prim.attributes["POSITION"];
+            }
+
+            if (prim.attributes.count("NORMAL") > 0)
+            {
+                normalIndex = prim.attributes["NORMAL"];
+            }
+
+            if (prim.attributes.count("TEXCOORD_0") > 0)
+            {
+                uv0Index = prim.attributes["TEXCOORD_0"];
+            }
+
+            // Vertex positions
+            tinygltf::Accessor positionAccessor = gltfModel.accessors[positionIndex];
+            tinygltf::BufferView positionBufferView = gltfModel.bufferViews[positionAccessor.bufferView];
+            const tinygltf::Buffer& positionBuffer = gltfModel.buffers[positionBufferView.buffer];
+            const uint8_t* positionBufferAddress = positionBuffer.data.data();
+            int positionStride = tinygltf::GetComponentSizeInBytes(positionAccessor.componentType) * tinygltf::GetNumComponentsInType(positionAccessor.type);
+            if (positionBufferView.byteStride > 0)
+                positionStride = positionBufferView.byteStride;
+
+            // Vertex indices
+            tinygltf::Accessor indexAccessor = gltfModel.accessors[indicesIndex];
+            tinygltf::BufferView indexBufferView = gltfModel.bufferViews[indexAccessor.bufferView];
+            const tinygltf::Buffer& indexBuffer = gltfModel.buffers[indexBufferView.buffer];
+            const uint8_t* indexBufferAddress = indexBuffer.data.data();
+            int indexStride = tinygltf::GetComponentSizeInBytes(indexAccessor.componentType) * tinygltf::GetNumComponentsInType(indexAccessor.type);
+
+            // Normals
+            tinygltf::Accessor normalAccessor;
+            tinygltf::BufferView normalBufferView;
+            const uint8_t* normalBufferAddress = nullptr;
+            int normalStride = -1;
+            if (normalIndex > -1)
+            {
+                normalAccessor = gltfModel.accessors[normalIndex];
+                normalBufferView = gltfModel.bufferViews[normalAccessor.bufferView];
+                const tinygltf::Buffer& normalBuffer = gltfModel.buffers[normalBufferView.buffer];
+                normalBufferAddress = normalBuffer.data.data();
+                normalStride = tinygltf::GetComponentSizeInBytes(normalAccessor.componentType) * tinygltf::GetNumComponentsInType(normalAccessor.type);
+                if (normalBufferView.byteStride > 0)
+                    normalStride = normalBufferView.byteStride;
+            }
+
+            // Texture coordinates
+            tinygltf::Accessor uv0Accessor;
+            tinygltf::BufferView uv0BufferView;
+            const uint8_t* uv0BufferAddress = nullptr;
+            int uv0Stride = -1;
+            if (uv0Index > -1)
+            {
+                uv0Accessor = gltfModel.accessors[uv0Index];
+                uv0BufferView = gltfModel.bufferViews[uv0Accessor.bufferView];
+                const tinygltf::Buffer& uv0Buffer = gltfModel.buffers[uv0BufferView.buffer];
+                uv0BufferAddress = uv0Buffer.data.data();
+                uv0Stride = tinygltf::GetComponentSizeInBytes(uv0Accessor.componentType) * tinygltf::GetNumComponentsInType(uv0Accessor.type);
+                if (uv0BufferView.byteStride > 0)
+                    uv0Stride = uv0BufferView.byteStride;
+            }
+
+            std::vector<glm::vec3> vertices;
+            std::vector<glm::vec3> normals;
+            std::vector<glm::vec2> uvs;
+
+            // Get vertex data
+            for (size_t vertexIndex = 0; vertexIndex < positionAccessor.count; vertexIndex++)
+            {
+                glm::vec3 vertex, normal;
+                glm::vec2 uv;
+
+                {
+                    const uint8_t* address = positionBufferAddress + positionBufferView.byteOffset + positionAccessor.byteOffset + (vertexIndex * positionStride);
+                    memcpy(&vertex, address, sizeof(glm::vec3));
+                }
+
+                if (normalIndex > -1)
+                {
+                    const uint8_t* address = normalBufferAddress + normalBufferView.byteOffset + normalAccessor.byteOffset + (vertexIndex * normalStride);
+                    memcpy(&normal, address, sizeof(glm::vec3));
+                }
+
+                if (uv0Index > -1)
+                {
+                    const uint8_t* address = uv0BufferAddress + uv0BufferView.byteOffset + uv0Accessor.byteOffset + (vertexIndex * uv0Stride);
+                    memcpy(&uv, address, sizeof(glm::vec2));
+                }
+
+                vertices.push_back(glm::vec3(inputTransform * glm::vec4(vertex, 1.0f)));
+                normals.push_back(glm::normalize(normalTransform * normal));
+                uvs.push_back(uv);
+            }
+
+            // Get index data
+            std::vector<int> indices(indexAccessor.count);
+            const uint8_t* baseAddress = indexBufferAddress + indexBufferView.byteOffset + indexAccessor.byteOffset;
+            if (indexStride == 1)
+            {
+                std::vector<uint8_t> quarter;
+                quarter.resize(indexAccessor.count);
+
+                memcpy(quarter.data(), baseAddress, (indexAccessor.count * indexStride));
+
+                // Convert quarter precision indices to full precision
+                for (size_t i = 0; i < indexAccessor.count; i++)
+                {
+                    indices[i] = quarter[i];
+                }
+            }
+            else if (indexStride == 2)
+            {
+                std::vector<uint16_t> half;
+                half.resize(indexAccessor.count);
+
+                memcpy(half.data(), baseAddress, (indexAccessor.count * indexStride));
+
+                // Convert half precision indices to full precision
+                for (size_t i = 0; i < indexAccessor.count; i++)
+                {
+                    indices[i] = half[i];
+                }
+            }
+            else
+            {
+                memcpy(indices.data(), baseAddress, (indexAccessor.count * indexStride));
+            }
+
+            // push geometrys, be careful at mat/vert index offset
+            int vertBase = scene->vertPos.size();
+            int sceneMatIdx = prim.material + scene->materials.size();
+            for (int tid = 0; tid * 3 < indices.size(); ++tid) {
+                Geom newGeom(TRIANGLE);
+                newGeom.vertIds = glm::ivec3(indices[3 * tid], indices[3 * tid + 1], indices[3 * tid + 2]) + glm::ivec3(vertBase);
+                newGeom.materialid = sceneMatIdx;
+                scene->geoms.push_back(newGeom);
+            }
+
+            // push pos, nor and uv
+            scene->vertPos.insert(scene->vertPos.end(), vertices.begin(), vertices.end());
+            scene->vertNor.insert(scene->vertNor.end(), normals.begin(), normals.end());
+            scene->vertUV.insert(scene->vertUV.end(), uvs.begin(), uvs.end());
+        }
+    }
+}
+
+// customed image load func, force 4 channels
+static bool customLoadImageData(tinygltf::Image* image, int image_idx, std::string* err,
+    std::string* warn, int req_width, int req_height,
+    const unsigned char* bytes, int size, void* user_data) {
+    int w, h, comp;
+    unsigned char* data = stbi_load_from_memory(bytes, size, &w, &h, &comp, 4);
+
+    if (!data) {
+        if (err) *err = "Failed to load image";
+        return false;
+    }
+
+    image->width = w;
+    image->height = h;
+    image->component = 4;
+    image->bits = 8;
+    image->pixel_type = TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE;
+    image->image.assign(data, data + w * h * 4);
+    stbi_image_free(data);
+
+    return true;
+}
+
+void loadTextures(Scene* scene, tinygltf::Model& gltfModel)
+{
+    for (size_t i = 0; i < gltfModel.textures.size(); ++i)
+    {
+        tinygltf::Texture& gltfTex = gltfModel.textures[i];
+        tinygltf::Image& image = gltfModel.images[gltfTex.source];
+        Texture texture;
+        texture.loadToCPU(image.image.data(), image.width, image.height, image.component);
+        scene->textures.push_back(texture);
+    }
+}
+
+void loadMaterials(Scene* scene, tinygltf::Model& gltfModel)
+{
+    int sceneTexIdx = scene->textures.size();
+    for (size_t i = 0; i < gltfModel.materials.size(); i++)
+    {
+        const tinygltf::Material gltfMaterial = gltfModel.materials[i];
+        const tinygltf::PbrMetallicRoughness pbr = gltfMaterial.pbrMetallicRoughness;
+
+        // Convert glTF material
+        Material material;
+        material.type = DISNEY;
+
+        // Albedo
+        material.color = glm::vec3((float)pbr.baseColorFactor[0], (float)pbr.baseColorFactor[1], (float)pbr.baseColorFactor[2]);
+        if (pbr.baseColorTexture.index > -1)
+            material.baseColorTexId = pbr.baseColorTexture.index + sceneTexIdx;
+
+        // Emission
+        material.emission = glm::vec3((float)gltfMaterial.emissiveFactor[0], (float)gltfMaterial.emissiveFactor[1], (float)gltfMaterial.emissiveFactor[2]);
+        if (gltfMaterial.emissiveTexture.index > -1)
+            material.emissionmapTexId = gltfMaterial.emissiveTexture.index + sceneTexIdx;
+
+        // Roughness and Metallic
+        material.roughness = sqrtf((float)pbr.roughnessFactor);
+        material.metallic = (float)pbr.metallicFactor;
+        if (pbr.metallicRoughnessTexture.index > -1)
+            material.metallicRoughnessTexId = pbr.metallicRoughnessTexture.index + sceneTexIdx;
+
+        // Normal Map
+        material.normalmapTexId = gltfMaterial.normalTexture.index + sceneTexIdx;
+
+        // KHR_materials_transmission
+        material.transmission = 0.f;
+        if (gltfMaterial.extensions.find("KHR_materials_transmission") != gltfMaterial.extensions.end())
+        {
+            const auto& ext = gltfMaterial.extensions.at("KHR_materials_transmission");
+            if (ext.Has("transmissionFactor"))
+                material.transmission = (float)(ext.Get("transmissionFactor").Get<double>());
+        }
+
+        // KHR_materials_ior
+        material.ior = 1.5f;
+        if (gltfMaterial.extensions.find("KHR_materials_ior") != gltfMaterial.extensions.end())
+        {
+            const auto& ext = gltfMaterial.extensions.at("KHR_materials_ior");
+            if (ext.Has("ior"))
+                material.ior = (float)(ext.Get("ior").Get<double>());
+        }
+
+        // KHR_materials_clearcoat
+        material.clearcoat = 0.f;
+        material.coatroughness = 0.f;
+        if (gltfMaterial.extensions.find("KHR_materials_clearcoat") != gltfMaterial.extensions.end())
+        {
+            const auto& ext = gltfMaterial.extensions.at("KHR_materials_clearcoat");
+            if (ext.Has("clearcoatFactor"))
+                material.clearcoat = (float)(ext.Get("clearcoatFactor").Get<double>());
+            if (ext.Has("clearcoatRoughnessFactor"))
+                material.coatroughness = (float)(ext.Get("clearcoatRoughnessFactor").Get<double>());
+        }
+
+        // KHR_materials_emissive_strength
+        if (gltfMaterial.extensions.find("KHR_materials_emissive_strength") != gltfMaterial.extensions.end())
+        {
+            const auto& ext = gltfMaterial.extensions.at("KHR_materials_emissive_strength");
+            if (ext.Has("emissiveStrength"))
+                material.emission *= (float)(ext.Get("emissiveStrength").Get<double>());
+        }
+
+        // my_subsurface
+        material.subsurface = 0.f;
+        if (gltfMaterial.extras.Has("my_subsurface")) {
+            material.subsurface = (float)(gltfMaterial.extras.Get("my_subsurface").Get<double>());
+        }
+
+        scene->materials.push_back(material);
+    }
+
+    // Default material
+    if (scene->materials.size() == 0)
+    {
+        Material defaultMat;
+        scene->materials.push_back(defaultMat);
+    }
+}
+
+void Scene::loadFromGLTF(const std::string& fileName, const glm::mat4& inputTransform)
+{
+    std::string ext = fileName.substr(fileName.find_last_of(".") + 1);
+
+    tinygltf::Model model;
+    tinygltf::TinyGLTF loader;
+    std::string error, warning;
+
+    loader.SetImageLoader(customLoadImageData, nullptr);
+
+    bool success = false;
+    if (ext == "gltf") {
+        success = loader.LoadASCIIFromFile(&model, &error, &warning, fileName);
+    }
+    else {
+        success = loader.LoadBinaryFromFile(&model, &error, &warning, fileName);
+    }
+    if (!success) {
+        std::cout << "failed to load model" << error << std::endl;
+        exit(-1);
+    }
+
+    auto instance = CollectInstancesOneScene(model);
+    assert(instance.size() > 0, "should have at least 1 instance in the scene");
+    glm::mat4 instTransform = instance[0].world;
+
+    loadMeshes(this, model, inputTransform * instTransform);
+    loadMaterials(this, model);
+    loadTextures(this, model);
 }
 
 void Scene::loadFromJSON(const std::string& jsonName)
@@ -218,6 +581,29 @@ void Scene::loadFromJSON(const std::string& jsonName)
             newGeom.materialid = MatNameToID[p["MATERIAL"]];
 
             geoms.push_back(newGeom);
+        }
+        else if (type == "mesh")
+        {
+            const auto& mesh_path = p["PATH"];
+            std::string fullmeshpath = baseDir + mesh_path.get<std::string>();
+
+            glm::vec3 translation(0.f), rotation(0.f), scalevec(1.f);
+            if (p.contains("TRANS")) {
+                const auto& trans = p["TRANS"];
+                translation = glm::vec3(trans[0], trans[1], trans[2]);
+            }
+            if (p.contains("ROTAT")) {
+                const auto& rotat = p["ROTAT"];
+                rotation = glm::vec3(rotat[0], rotat[1], rotat[2]);
+            }
+            if (p.contains("SCALE")) {
+                const auto& scale = p["SCALE"];
+                scalevec = glm::vec3(scale[0], scale[1], scale[2]);
+            }
+            
+            glm::mat4 transform = utilityCore::buildTransformationMatrix(translation, rotation, scalevec);
+
+            loadFromGLTF(fullmeshpath, transform);
         }
     }
 
