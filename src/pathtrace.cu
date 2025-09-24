@@ -342,15 +342,17 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
         );
 
 #if PT_DOF
-        glm::vec3 focusPoint = cam.position + cam.focalLength * segment.ray.direction;
-        // sample on len circle
-        float rad = sqrtf(u01(rng)) * cam.lenRadius;
-        float theta = TWO_PI * u01(rng);
-        float lensSampleX = rad * cos(theta);
-        float lensSampleY = rad * sin(theta);
-        glm::vec3 offset = cam.right * lensSampleX + cam.up * lensSampleY;
-        segment.ray.origin = cam.position + offset;
-        segment.ray.direction = glm::normalize(focusPoint - segment.ray.origin);
+        if (cam.lenRadius > 0.f) {
+            glm::vec3 focusPoint = cam.position + cam.focalLength * segment.ray.direction;
+            // sample on len circle
+            float rad = sqrtf(u01(rng)) * cam.lenRadius;
+            float theta = TWO_PI * u01(rng);
+            float lensSampleX = rad * cos(theta);
+            float lensSampleY = rad * sin(theta);
+            glm::vec3 offset = cam.right * lensSampleX + cam.up * lensSampleY;
+            segment.ray.origin = cam.position + offset;
+            segment.ray.direction = glm::normalize(focusPoint - segment.ray.origin);
+        }
 #endif // PT_DOF
 
 #if PT_AA
