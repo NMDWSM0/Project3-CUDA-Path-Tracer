@@ -6,8 +6,10 @@
 
 #include <thrust/random.h>
 
-constexpr float __device__ toonCos = 0.f;
+constexpr float __device__ toonCos = 0.1f; 
+constexpr float __device__ toonGradientCos = 0.05f; // toonCos + toonGradientCos < 1
 constexpr float __device__ toonPdf = 1.f / (2.f * (1 - toonCos)) * INV_PI;
+constexpr float __device__ toonBsdfCoeff = (1.f - toonCos) / (1 - 0.5f * toonGradientCos - toonCos);
 
 __host__ __device__ glm::vec3 cosineSampleHemisphere(
     glm::vec3 normal,
@@ -303,7 +305,7 @@ __host__ __device__ glm::vec3 F_Disney(
     glm::vec3 diffuse_bsdf(0.f);  // not multiplied by absdot
     if (diffPr > 0.f && reflect) {
         if (NdotL > toonCos) {
-            diffuse_bsdf = m.color * toonPdf;
+            diffuse_bsdf = m.color * toonPdf * glm::smoothstep(toonCos, toonCos + toonGradientCos, NdotL) * toonBsdfCoeff;
             pdf += toonPdf * diffPr;
         }
     }
@@ -469,7 +471,7 @@ __host__ __device__ void Sample_f_Disney(
     glm::vec3 half;
     if (r1 < cdf[0]) {       // Diffuse
 #if PT_TOON_SHADING
-        wiW = uniformSampleHemisphere(ffnormal, rng);
+        wiW = uniformSampleAngleHemisphere(ffnormal, toonCos, rng);
 #else
         wiW = cosineSampleHemisphere(ffnormal, rng);
 #endif
@@ -516,7 +518,7 @@ __host__ __device__ void Sample_f_Disney(
     glm::vec3 diffuse_bsdf(0.f);  // not multiplied by absdot
     if (diffPr > 0.f && reflect) {
         if (ffNdotL > toonCos) {
-            diffuse_bsdf = m.color * toonPdf;
+            diffuse_bsdf = m.color * toonPdf * glm::smoothstep(toonCos, toonCos + toonGradientCos, ffNdotL) * toonBsdfCoeff;
             pdf += toonPdf * diffPr;
         }
     }
