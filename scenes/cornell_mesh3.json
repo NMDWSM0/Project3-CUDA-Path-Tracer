@@ -87,7 +87,7 @@
         },
         {
             "TYPE": "mesh",
-            "PATH": "./Castorice_Toon2.glb",
+            "PATH": "./Castorice_Toon.glb",
             "ROTAT": [0.0, 180.0, 0.0],
             "SCALE": [5.0, 5.0, 5.0]
         }
