@@ -758,7 +758,8 @@ __host__ __device__ void directLight(
     Sample_Li(light, scatterPos, lightDir, lightNor, lightDist, pdf_Li, rng);
 
     // check shadow
-    Ray shadowRay = Ray(scatterPos + lightDir * EPSILON * glm::mix(100.f, 10.f, glm::dot(lightDir, normal)), lightDir);
+    float offset = EPSILON * glm::mix(100.f, 10.f, glm::dot(lightDir, normal));
+    Ray shadowRay = Ray(scatterPos + lightDir * offset, lightDir - 2 * offset);
     bool inShadow = getAnyHit(shadowRay, curSchannel, bvhNodes, geoms, geoms_size, lightgeoms, lightgeoms_size, vertexPos, vertexSchannel, lightDist - EPSILON);
 
     if (!inShadow) {

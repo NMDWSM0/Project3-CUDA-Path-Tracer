@@ -910,7 +910,7 @@ void pathtrace(uchar4* pbo, int maxiter, int iter)
 #endif // PT_DENOISE
 
     // Retrieve image from GPU
-    cudaMemcpy(hst_scene->state.image.data(), dev_GB_normal,
+    cudaMemcpy(hst_scene->state.image.data(), dev_postimage,
         pixelcount * sizeof(glm::vec3), cudaMemcpyDeviceToHost);
 
     checkCUDAError("pathtrace");
