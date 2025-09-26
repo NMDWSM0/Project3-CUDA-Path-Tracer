@@ -95,6 +95,7 @@ static void loadMeshes(Scene* scene, tinygltf::Model& gltfModel, const glm::mat4
             int positionIndex = -1;
             int normalIndex = -1;
             int uv0Index = -1;
+            int schannelIndex = -1;
 
             if (prim.attributes.count("POSITION") > 0)
             {
@@ -109,6 +110,11 @@ static void loadMeshes(Scene* scene, tinygltf::Model& gltfModel, const glm::mat4
             if (prim.attributes.count("TEXCOORD_0") > 0)
             {
                 uv0Index = prim.attributes["TEXCOORD_0"];
+            }
+
+            if (prim.attributes.count("_SCHANNEL") > 0)
+            {
+                schannelIndex = prim.attributes["_SCHANNEL"];
             }
 
             // Vertex positions
@@ -159,15 +165,33 @@ static void loadMeshes(Scene* scene, tinygltf::Model& gltfModel, const glm::mat4
                     uv0Stride = uv0BufferView.byteStride;
             }
 
+            // Shadow channel
+            tinygltf::Accessor schannelAccessor;
+            tinygltf::BufferView schannelBufferView;
+            const uint8_t* schannelBufferAddress = nullptr;
+            int schannelStride = -1;
+            if (schannelIndex > -1)
+            {
+                schannelAccessor = gltfModel.accessors[schannelIndex];
+                schannelBufferView = gltfModel.bufferViews[schannelAccessor.bufferView];
+                const tinygltf::Buffer& schannelBuffer = gltfModel.buffers[schannelBufferView.buffer];
+                schannelBufferAddress = schannelBuffer.data.data();
+                schannelStride = tinygltf::GetComponentSizeInBytes(schannelAccessor.componentType) * tinygltf::GetNumComponentsInType(schannelAccessor.type);
+                if (schannelBufferView.byteStride > 0)
+                    schannelStride = schannelBufferView.byteStride;
+            }
+
             std::vector<glm::vec3> vertices;
             std::vector<glm::vec3> normals;
             std::vector<glm::vec2> uvs;
+            std::vector<char> schannels;
 
             // Get vertex data
             for (size_t vertexIndex = 0; vertexIndex < positionAccessor.count; vertexIndex++)
             {
                 glm::vec3 vertex, normal;
                 glm::vec2 uv;
+                float schannel = 0;
 
                 {
                     const uint8_t* address = positionBufferAddress + positionBufferView.byteOffset + positionAccessor.byteOffset + (vertexIndex * positionStride);
@@ -186,9 +210,16 @@ static void loadMeshes(Scene* scene, tinygltf::Model& gltfModel, const glm::mat4
                     memcpy(&uv, address, sizeof(glm::vec2));
                 }
 
+                if (schannelIndex > -1)
+                {
+                    const uint8_t* address = schannelBufferAddress + schannelBufferView.byteOffset + schannelAccessor.byteOffset + (vertexIndex * schannelStride);
+                    memcpy(&schannel, address, sizeof(float));
+                }
+
                 vertices.push_back(glm::vec3(inputTransform * glm::vec4(vertex, 1.0f)));
                 normals.push_back(glm::normalize(normalTransform * normal));
                 uvs.push_back(uv);
+                schannels.push_back(static_cast<char>((int)schannel));
             }
 
             // Get index data
@@ -239,6 +270,7 @@ static void loadMeshes(Scene* scene, tinygltf::Model& gltfModel, const glm::mat4
             scene->vertPos.insert(scene->vertPos.end(), vertices.begin(), vertices.end());
             scene->vertNor.insert(scene->vertNor.end(), normals.begin(), normals.end());
             scene->vertUV.insert(scene->vertUV.end(), uvs.begin(), uvs.end());
+            scene->vertSchannel.insert(scene->vertSchannel.end(), schannels.begin(), schannels.end());
         }
     }
 }
@@ -489,7 +521,8 @@ void Scene::loadFromJSON(const std::string& jsonName)
             const auto& emission = p["EMISSION"];
             const auto& position = p["POSITION"];
             newLight.emission = glm::vec3(emission[0], emission[1], emission[2]);
-            newLight.position = glm::vec3(position[0], position[1], position[2]);
+            newLight.position = glm::normalize(glm::vec3(position[0], position[1], position[2]));
+            newLight.radius = p.value("ALPHA", 0.265f) * PI / 180;  // half angle range to create soft shadow for directional light, sun is 0.265 degrees
             lightgeoms.push_back(newLight);
         }
     }
@@ -651,8 +684,14 @@ void Scene::loadFromJSON(const std::string& jsonName)
     if (cameraData.contains("FOCALLENGTH")) {
         camera.focalLength = cameraData["FOCALLENGTH"];
     }
+    else {
+        camera.focalLength = 1.f;
+    }
     if (cameraData.contains("LENRADIUS")) {
         camera.lenRadius = cameraData["LENRADIUS"];
+    }
+    else {
+        camera.lenRadius = 0.f;
     }
     camera.autoFocus = true;
 

@@ -30,6 +30,7 @@ static std::string startTimeString;
 static bool leftMousePressed = false;
 static bool rightMousePressed = false;
 static bool middleMousePressed = false;
+static bool ctrlPressed = false;
 static double lastX;
 static double lastY;
 
@@ -496,9 +497,16 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
             case GLFW_KEY_SPACE:
                 camchanged = true;
                 renderState = &scene->state;
-                Camera& cam = renderState->camera;
-                cam.lookAt = ogLookAt;
+                renderState->camera.lookAt = ogLookAt;
                 break;
+            case GLFW_KEY_LEFT_CONTROL:
+                ctrlPressed = true;
+                break;
+        }
+    }
+    else if (action == GLFW_RELEASE) {
+        if (key == GLFW_KEY_LEFT_CONTROL) {
+            ctrlPressed = false;
         }
     }
 }
@@ -540,8 +548,9 @@ void mousePositionCallback(GLFWwindow* window, double xpos, double ypos)
     {
         renderState = &scene->state;
         Camera& cam = renderState->camera;
-        glm::vec3 forward = cam.view;
-        forward.y = 0.0f;
+        glm::vec3 forward = ctrlPressed ? cam.view : cam.up;
+        if (ctrlPressed) forward.y = 0.0f;
+        else forward.z = 0.0f;
         forward = glm::normalize(forward);
         glm::vec3 right = cam.right;
         right.y = 0.0f;

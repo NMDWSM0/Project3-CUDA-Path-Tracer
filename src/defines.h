@@ -20,10 +20,13 @@
 #define PT_DENOISE 1
 
 // denoise realtimely or not
-#define PT_REALTIME_DENOISE 1
+#define PT_REALTIME_DENOISE 0
+
+// normal map G reverse
+#define PT_OPENGL_NORMALMAP 0
 
 // toon shading
-#define PT_TOON_SHADING 0
+#define PT_TOON_SHADING 1
 
 // use BVH intersection
 #define PT_USEBVH 1

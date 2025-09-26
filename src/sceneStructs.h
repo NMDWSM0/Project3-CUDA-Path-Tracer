@@ -177,8 +177,9 @@ struct PathSegment
     glm::vec3 color;
     glm::vec3 throughput;
     int pixelIndex;
-    int remainingBounces;
     float pdf;
+    short remainingBounces;
+    char schannel;
 };
 
 // Use with a corresponding PathSegment to do:
@@ -197,8 +198,9 @@ struct ShadeableIntersection
         float pdf_Li;
     };
     glm::vec3 tangent;
+    char schannel;
 
-    __host__ __device__ ShadeableIntersection() : t(0), materialId(-1), surfaceNormal(0.f), texCoord(0.f), tangent(0.f) {};
+    __host__ __device__ ShadeableIntersection() : t(0), materialId(-1), surfaceNormal(0.f), texCoord(0.f), tangent(0.f), schannel(0) {};
 
     __host__ __device__ ShadeableIntersection(const ShadeableIntersection& other) {
         std::memcpy(this, &other, sizeof(ShadeableIntersection));

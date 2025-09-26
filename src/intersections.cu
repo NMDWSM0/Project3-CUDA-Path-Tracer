@@ -2,6 +2,14 @@
 #include "intersections.h"
 #include "utilities.h"
 
+constexpr bool __device__ ChannelCheck[5][5] = {
+    {true, true, true, true, true},
+    {true, false, false, false, false},
+    {true, false, false, false, false},
+    {true, true, true, true, false},
+    {false, false, false, false, false},
+};
+
 __host__ __device__ float AABBIntersect(glm::vec3 minCorner, glm::vec3 maxCorner, const Ray& r)
 {
     glm::vec3 invDir = glm::vec3(1.0) / r.direction;
@@ -73,7 +81,7 @@ __host__ __device__ float TriangleIntersect(glm::vec3 v0, glm::vec3 v1, glm::vec
 
     bary.y = glm::dot(tv, pv) / det;
     bary.z = glm::dot(r.direction, qv) / det;
-    bary.x = 1.0 - bary.y - bary.z;
+    bary.x = 1.f - bary.y - bary.z;
     float t = glm::dot(e1, qv) / det;
     
     if (bary.x >= 0 && bary.y >= 0 && bary.z >= 0 && t >= 0) {
@@ -88,12 +96,14 @@ __host__ __device__ float TriangleIntersect(glm::vec3 v0, glm::vec3 v1, glm::vec
 
 __host__ __device__ bool getAnyHit(
     const Ray& r,
+    char curSchannel,
     LinearBVHNode* bvhNodes,
     Geom* geoms,
     int geoms_size,
     LightGeom* lightgeoms,
     int lightgeoms_size,
     glm::vec3* vertexPos,
+    char* vertexSchannel,
     float maxt)
 {
     // first check light source
@@ -147,7 +157,13 @@ __host__ __device__ bool getAnyHit(
             if (geom.type == TRIANGLE)
             {
                 vertIds = geom.vertIds;
-                distance = TriangleIntersect(vertexPos[vertIds[0]], vertexPos[vertIds[1]], vertexPos[vertIds[2]], r, barycentricParameters);
+                char triSchannel = glm::min(vertexSchannel[vertIds[0]], glm::min(vertexSchannel[vertIds[1]], vertexSchannel[vertIds[2]]));
+                if (!ChannelCheck[curSchannel][triSchannel]) {
+                    distance = INFINITY;
+                }
+                else {
+                    distance = TriangleIntersect(vertexPos[vertIds[0]], vertexPos[vertIds[1]], vertexPos[vertIds[2]], r, barycentricParameters);
+                }
             }
             else if (geom.type == SPHERE)
             {
@@ -227,6 +243,7 @@ __host__ __device__ bool getAnyHit(
 
 __host__ __device__ bool getClosestHit(
     const Ray& r,
+    char curSchannel,
     LinearBVHNode* bvhNodes,
     Geom* geoms,
     int geoms_size,
@@ -235,6 +252,7 @@ __host__ __device__ bool getClosestHit(
     glm::vec3* vertexPos,
     glm::vec3* vertexNor,
     glm::vec2* vertexUV,
+    char* vertexSchannel,
     ShadeableIntersection& intersection) 
 {
     float t = INFINITY;
@@ -288,6 +306,7 @@ __host__ __device__ bool getClosestHit(
     glm::vec3 barycentricParameters;
     glm::ivec3 vertIds;
     glm::vec3 vp0, vp1, vp2, center;
+    char hitSchannel = 0;
 #if PT_USEBVH
     // traversal stack
     int stack[64];
@@ -304,13 +323,20 @@ __host__ __device__ bool getClosestHit(
             glm::vec3 temp_bary;
             glm::ivec3 temp_vertIds;
             glm::vec3 temp_vp0, temp_vp1, temp_vp2, temp_center;
+            char triSchannel = 0;
             if (geom.type == TRIANGLE)
             {
                 temp_vertIds = geom.vertIds;
                 temp_vp0 = vertexPos[temp_vertIds[0]];
                 temp_vp1 = vertexPos[temp_vertIds[1]];
                 temp_vp2 = vertexPos[temp_vertIds[2]];
-                distance = TriangleIntersect(temp_vp0, temp_vp1, temp_vp2, r, temp_bary);
+                triSchannel = glm::min(vertexSchannel[temp_vertIds[0]], glm::min(vertexSchannel[temp_vertIds[1]], vertexSchannel[temp_vertIds[2]]));
+                if (!ChannelCheck[curSchannel][triSchannel]) {
+                    distance = INFINITY;
+                }
+                else {
+                    distance = TriangleIntersect(temp_vp0, temp_vp1, temp_vp2, r, temp_bary);
+                }
             }
             else if (geom.type == SPHERE)
             {
@@ -333,6 +359,7 @@ __host__ __device__ bool getClosestHit(
                 vp1 = temp_vp1;
                 vp2 = temp_vp2;
                 center = temp_center;
+                hitSchannel = triSchannel;
             }
         }
         else {
@@ -455,9 +482,12 @@ __host__ __device__ bool getClosestHit(
             glm::vec2 deltaUV2 = tc2 - tc0;
 
             float invdet = 1.0f / (deltaUV1.x * deltaUV2.y - deltaUV1.y * deltaUV2.x);
+            glm::vec3 tangent = (deltaPos1 * deltaUV2.y - deltaPos2 * deltaUV1.y) * invdet;
 
-            intersection.tangent = (deltaPos1 * deltaUV2.y - deltaPos2 * deltaUV1.y) * invdet;
+            intersection.tangent = glm::normalize(tangent - intersection.surfaceNormal * glm::dot(intersection.surfaceNormal, tangent));
         }
+
+        intersection.schannel = hitSchannel;
     }
     return true;
 }

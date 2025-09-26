@@ -62,12 +62,14 @@ __host__ __device__ void Sample_Li(
     thrust::default_random_engine& rng);
 
 __host__ __device__ void directLight(
+    char curSchannel,
     LinearBVHNode* bvhNodes,
     Geom* geoms,
     int geoms_size,
     LightGeom* lightgeoms,
     int lightgeoms_size,
     glm::vec3* vertexPos,
+    char* vertexSchannel,
     PathSegment& pathSegment,
     glm::vec3 intersect,
     glm::vec3 normal,

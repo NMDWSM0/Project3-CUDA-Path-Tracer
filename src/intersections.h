@@ -40,6 +40,7 @@ __host__ __device__ inline glm::vec3 multiplyMV(glm::mat4 m, glm::vec4 v)
 
 __host__ __device__ bool getClosestHit(
     const Ray& r,
+    char curSchannel,
     LinearBVHNode* bvhNodes,
     Geom* geoms,
     int geoms_size,
@@ -48,14 +49,17 @@ __host__ __device__ bool getClosestHit(
     glm::vec3* vertexPos,
     glm::vec3* vertexNor,
     glm::vec2* vertexUV,
+    char* vertexSchannel,
     ShadeableIntersection& intersection);
 
 __host__ __device__ bool getAnyHit(
     const Ray& r,
+    char curSchannel,
     LinearBVHNode* bvhNodes,
     Geom* geoms,
     int geoms_size,
     LightGeom* lightgeoms,
     int lightgeoms_size,
     glm::vec3* vertexPos,
+    char* vertexSchannel,
     float maxt);

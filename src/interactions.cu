@@ -6,6 +6,9 @@
 
 #include <thrust/random.h>
 
+constexpr float __device__ toonCos = 0.f;
+constexpr float __device__ toonPdf = 1.f / (2.f * (1 - toonCos)) * INV_PI;
+
 __host__ __device__ glm::vec3 cosineSampleHemisphere(
     glm::vec3 normal,
     thrust::default_random_engine &rng)
@@ -53,6 +56,48 @@ __host__ __device__ glm::vec3 uniformSampleHemisphere(
     thrust::uniform_real_distribution<float> u01(0, 1);
 
     float up = u01(rng);
+    float over = sqrt(fmax(0.f, 1 - up * up));
+    float around = u01(rng) * TWO_PI;
+
+    // Find a direction that is not the normal based off of whether or not the
+    // normal's components are all equal to sqrt(1/3) or whether or not at
+    // least one component is less than sqrt(1/3). Learned this trick from
+    // Peter Kutz.
+
+    glm::vec3 directionNotNormal;
+    if (abs(normal.x) < SQRT_OF_ONE_THIRD)
+    {
+        directionNotNormal = glm::vec3(1, 0, 0);
+    }
+    else if (abs(normal.y) < SQRT_OF_ONE_THIRD)
+    {
+        directionNotNormal = glm::vec3(0, 1, 0);
+    }
+    else
+    {
+        directionNotNormal = glm::vec3(0, 0, 1);
+    }
+
+    // Use not-normal direction to generate two perpendicular directions
+    glm::vec3 perpendicularDirection1 =
+        glm::normalize(glm::cross(normal, directionNotNormal));
+    glm::vec3 perpendicularDirection2 =
+        glm::normalize(glm::cross(normal, perpendicularDirection1));
+
+    return up * normal
+        + cos(around) * over * perpendicularDirection1
+        + sin(around) * over * perpendicularDirection2;
+}
+
+__host__ __device__ glm::vec3 uniformSampleAngleHemisphere(
+    glm::vec3 normal, 
+    float cosAngle, 
+    thrust::default_random_engine& rng)
+{
+    thrust::uniform_real_distribution<float> u01(0, 1);
+
+    float up = u01(rng);
+    up = up * (1 - cosAngle) + cosAngle;
     float over = sqrt(fmax(0.f, 1 - up * up));
     float around = u01(rng) * TWO_PI;
 
@@ -173,6 +218,7 @@ __host__ __device__ glm::vec3 sampleGTR2(
 
 
 
+
 __host__ __device__ glm::vec3 F_Diffuse(
     const PathSegment& pathSegment,
     glm::vec3 intersect,
@@ -253,17 +299,20 @@ __host__ __device__ glm::vec3 F_Disney(
     float tmpPdf = 0.f;
     const float VDotH = abs(glm::dot(woW, half));
     // Diffuse
+#if PT_TOON_SHADING
+    glm::vec3 diffuse_bsdf(0.f);  // not multiplied by absdot
+    if (diffPr > 0.f && reflect) {
+        if (NdotL > toonCos) {
+            diffuse_bsdf = m.color * toonPdf;
+            pdf += toonPdf * diffPr;
+        }
+    }
+#else
     if (diffPr > 0.f && reflect) {
         bsdf += evaluateDisneyDiffuse(m, woW, wiW, half, ffnormal, tmpPdf) * dielectricWeight;
         pdf += tmpPdf * diffPr;
-
-#if PT_TOON_SHADING
-        if (abs(NdotL) > 0.01f) {
-            bsdf /= abs(NdotL);
-            bsdf *= (1 - pow(1 - abs(NdotL), 100.f)) * 0.5f;
-        }
-#endif // PT_TOON_SHADING
     }
+#endif // PT_TOON_SHADING
 
     // Dielectric Reflection
     if (dielectricPr > 0.f && reflect) {
@@ -303,7 +352,11 @@ __host__ __device__ glm::vec3 F_Disney(
         pdf += tmpPdf * clearCoatPr;
     }
 
+#if PT_TOON_SHADING
+    return diffuse_bsdf + bsdf * abs(NdotL);
+#else
     return bsdf * abs(NdotL);  // bsdf * absdot
+#endif // PT_TOON_SHADING
 }
 
 
@@ -415,7 +468,11 @@ __host__ __device__ void Sample_f_Disney(
     float r1 = u01(rng) * cdf[4];
     glm::vec3 half;
     if (r1 < cdf[0]) {       // Diffuse
+#if PT_TOON_SHADING
+        wiW = uniformSampleHemisphere(ffnormal, rng);
+#else
         wiW = cosineSampleHemisphere(ffnormal, rng);
+#endif
     }
     else if (r1 < cdf[2]) {  // Dielectric + Metallic reflection
         half = sampleGTR2(m.roughness, ffnormal, rng);
@@ -455,17 +512,20 @@ __host__ __device__ void Sample_f_Disney(
     float tmpPdf = 0.f;
     const float VDotH = abs(glm::dot(woW, half));
     // Diffuse
+#if PT_TOON_SHADING
+    glm::vec3 diffuse_bsdf(0.f);  // not multiplied by absdot
+    if (diffPr > 0.f && reflect) {
+        if (ffNdotL > toonCos) {
+            diffuse_bsdf = m.color * toonPdf;
+            pdf += toonPdf * diffPr;
+        }
+    }
+#else
     if (diffPr > 0.f && reflect) {
         bsdf += evaluateDisneyDiffuse(m, woW, wiW, half, ffnormal, tmpPdf) * dielectricWeight;
         pdf += tmpPdf * diffPr;
-
-#if PT_TOON_SHADING
-        if (abs(ffNdotL) > 0.01f) {
-            bsdf /= abs(ffNdotL);
-            bsdf *= (1 - pow(1 - abs(ffNdotL), 100.f)) * 0.5f;
-        }
-#endif // PT_TOON_SHADING
     }
+#endif // PT_TOON_SHADING
 
     // Dielectric Reflection
     if (dielectricPr > 0.f && reflect) {
@@ -506,7 +566,11 @@ __host__ __device__ void Sample_f_Disney(
     }
 
     if (pdf > 0.f && !isnan(pdf)) {
+#if PT_TOON_SHADING
+        pathSegment.throughput *= (diffuse_bsdf + bsdf * abs(ffNdotL)) / pdf;
+#else
         pathSegment.throughput *= bsdf * abs(ffNdotL) / pdf;
+#endif
         pathSegment.pdf = pdf;
         pathSegment.ray = { intersect + wiW * EPSILON, wiW };
     }
@@ -577,8 +641,11 @@ __host__ __device__ void Sample_Li_Directional (
     float& pdf,
     thrust::default_random_engine& rng)
 {
+    thrust::uniform_real_distribution<float> u01(0, 1);
+    float r1 = u01(rng), r2 = u01(rng);
     // position is actually direction
-    lightDir = -normalize(light.position);
+    glm::vec3 dir = -normalize(light.position);
+    lightDir = uniformSampleAngleHemisphere(dir, cosf(light.radius), rng);
     lightNor = lightDir;
     lightDist = INFINITY;
     pdf = 1.0;
@@ -658,12 +725,14 @@ __host__ __device__ void Sample_Li(
 
 
 __host__ __device__ void directLight(
+    char curSchannel, 
     LinearBVHNode* bvhNodes,
     Geom* geoms,
     int geoms_size,
     LightGeom* lightgeoms,
     int lightgeoms_size,
     glm::vec3* vertexPos,
+    char* vertexSchannel,
     PathSegment& pathSegment,
     glm::vec3 intersect,
     glm::vec3 normal,
@@ -688,7 +757,7 @@ __host__ __device__ void directLight(
 
     // check shadow
     Ray shadowRay = Ray(scatterPos, lightDir);
-    bool inShadow = getAnyHit(shadowRay, bvhNodes, geoms, geoms_size, lightgeoms, lightgeoms_size, vertexPos, lightDist - EPSILON);
+    bool inShadow = getAnyHit(shadowRay, curSchannel, bvhNodes, geoms, geoms_size, lightgeoms, lightgeoms_size, vertexPos, vertexSchannel, lightDist - EPSILON);
 
     if (!inShadow) {
         float pdf_bsdf;
@@ -725,7 +794,11 @@ __device__ void getMatParams(
     }
     if (mat.normalmapTexId >= 0) {
         float4 c = tex2D<float4>(textureHandles[mat.normalmapTexId], uv.x, uv.y);
-        glm::vec3 normal_tspace = glm::normalize(glm::vec3(c.x, c.y, c.z));
+        glm::vec3 normal_tspace = glm::vec3(c.x, c.y, c.z);
+#if PT_OPENGL_NORMALMAP
+        normal_tspace.y = 1.f - normal_tspace.y;
+#endif
+        normal_tspace = glm::normalize(normal_tspace * 2.f - 1.f);
         glm::vec3 bitangent = glm::cross(intersect.surfaceNormal, intersect.tangent);
         normal = glm::normalize(intersect.tangent * normal_tspace.x + bitangent * normal_tspace.y + intersect.surfaceNormal * normal_tspace.z);
     }

@@ -66,6 +66,7 @@ static LinearBVHNode* dev_bvhnodes = nullptr;
 static glm::vec3* dev_vertPos = nullptr;
 static glm::vec3* dev_vertNor = nullptr;
 static glm::vec2* dev_vertUV = nullptr;
+static char* dev_vertSchannel = nullptr;
 // mats & textures
 static Material* dev_materials = nullptr;
 static char* dev_mattypes = nullptr;
@@ -145,6 +146,9 @@ void pathtraceInit(Scene* scene)
     cudaMalloc(&dev_vertUV, scene->vertUV.size() * sizeof(glm::vec2));
     cudaMemcpy(dev_vertUV, scene->vertUV.data(), scene->vertUV.size() * sizeof(glm::vec2), cudaMemcpyHostToDevice);
 
+    cudaMalloc(&dev_vertSchannel, scene->vertSchannel.size() * sizeof(char));
+    cudaMemcpy(dev_vertSchannel, scene->vertSchannel.data(), scene->vertSchannel.size() * sizeof(char), cudaMemcpyHostToDevice);
+
     cudaMalloc(&dev_pathremains, pixelcount * sizeof(int));
     cudaMalloc(&dev_pathindices, pixelcount * sizeof(int));
 
@@ -215,6 +219,7 @@ void pathtraceFree()
     cudaFree(dev_vertPos);
     cudaFree(dev_vertNor);
     cudaFree(dev_vertUV);
+    cudaFree(dev_vertSchannel);
     cudaFree(dev_pathremains);
     cudaFree(dev_pathindices);
     cudaFree(dev_mattypes);
@@ -366,6 +371,7 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
 
         segment.pixelIndex = index;
         segment.remainingBounces = traceDepth;
+        segment.schannel = 0;
     }
 }
 
@@ -384,6 +390,7 @@ __global__ void computeIntersections(
     glm::vec3* vertexPos,
     glm::vec3* vertexNor,
     glm::vec2* vertexUV,
+    char* vertexSchannel,
     char* mattypes,
     ShadeableIntersection* intersections,
     int* pathIndices)
@@ -400,6 +407,7 @@ __global__ void computeIntersections(
     glm::vec3* vertexPos,
     glm::vec3* vertexNor,
     glm::vec2* vertexUV,
+    char* vertexSchannel,
     ShadeableIntersection* intersections)
 #endif // PT_MATERIAL_SORT
 {
@@ -425,7 +433,7 @@ __global__ void computeIntersections(
             hit = false;
         }
         else {
-            hit = getClosestHit(ray, bvhNodes, geoms, geoms_size, lightgeoms, lightgeoms_size, vertexPos, vertexNor, vertexUV, isect);
+            hit = getClosestHit(ray, pathSegments[path_index].schannel, bvhNodes, geoms, geoms_size, lightgeoms, lightgeoms_size, vertexPos, vertexNor, vertexUV, vertexSchannel, isect);
         }
 
 #if PT_MATERIAL_SORT
@@ -474,6 +482,7 @@ __global__ void computeGBufferIntersections(
     glm::vec3* vertexPos,
     glm::vec3* vertexNor,
     glm::vec2* vertexUV,
+    char* vertexSchannel,
     ShadeableIntersection* intersections)
 {
     int path_index = blockIdx.x * blockDim.x + threadIdx.x;
@@ -482,7 +491,7 @@ __global__ void computeGBufferIntersections(
     {
         Ray ray = pathSegments[path_index].ray;
         ShadeableIntersection isect;
-        bool hit = getClosestHit(ray, bvhNodes, geoms, geoms_size, lightgeoms, lightgeoms_size, vertexPos, vertexNor, vertexUV, isect);
+        bool hit = getClosestHit(ray, pathSegments[path_index].schannel, bvhNodes, geoms, geoms_size, lightgeoms, lightgeoms_size, vertexPos, vertexNor, vertexUV, vertexSchannel, isect);
 
         if (!hit)
         {
@@ -558,6 +567,7 @@ __global__ void shadeMaterial(
     LightGeom* lightgeoms,
     int lightgeoms_size,
     glm::vec3* vertexPos,
+    char* vertexSchannel,
     Material* materials,
     cudaTextureObject_t* textureHandles,
     cudaTextureObject_t envmapHandle)
@@ -575,6 +585,7 @@ __global__ void shadeMaterial(
     LightGeom* lightgeoms,
     int lightgeoms_size,
     glm::vec3* vertexPos,
+    char* vertexSchannel,
     Material* materials,
     cudaTextureObject_t* textureHandles,
     cudaTextureObject_t envmapHandle)
@@ -633,9 +644,10 @@ __global__ void shadeMaterial(
                 // add material emission - not importance sampled 
                 segment.color += segment.throughput * material.emission;         
 #if PT_MIS
-                directLight(bvhNodes, geoms, geoms_size, lightgeoms, lightgeoms_size, vertexPos, segment, intersectPos, shadingNormal, material, rng);
+                directLight(intersection.schannel, bvhNodes, geoms, geoms_size, lightgeoms, lightgeoms_size, vertexPos, vertexSchannel, segment, intersectPos, shadingNormal, material, rng);
 #endif // PT_MIS
                 Sample_f(segment, intersectPos, shadingNormal, material, rng);
+                segment.schannel = intersection.schannel;
                 segment.remainingBounces--;
 
 #if PT_RUSSIAN_ROULETTE
@@ -752,6 +764,7 @@ void pathtrace(uchar4* pbo, int maxiter, int iter)
             dev_vertPos,
             dev_vertNor,
             dev_vertUV,
+            dev_vertSchannel,
             dev_mattypes,
             dev_intersections,
             dev_pathindices
@@ -769,6 +782,7 @@ void pathtrace(uchar4* pbo, int maxiter, int iter)
             dev_vertPos,
             dev_vertNor,
             dev_vertUV,
+            dev_vertSchannel,
             dev_intersections
             );
 #endif // PT_MATERIAL_SORT
@@ -801,6 +815,7 @@ void pathtrace(uchar4* pbo, int maxiter, int iter)
             dev_lightgeoms,
             hst_scene->lightgeoms.size(),
             dev_vertPos,
+            dev_vertSchannel,
             dev_materials,
             dev_texurehandles,
             envmaphandle
@@ -819,6 +834,7 @@ void pathtrace(uchar4* pbo, int maxiter, int iter)
             dev_lightgeoms,
             hst_scene->lightgeoms.size(),
             dev_vertPos,
+            dev_vertSchannel,
             dev_materials,
             dev_texurehandles,
             envmaphandle
@@ -894,7 +910,7 @@ void pathtrace(uchar4* pbo, int maxiter, int iter)
 #endif // PT_DENOISE
 
     // Retrieve image from GPU
-    cudaMemcpy(hst_scene->state.image.data(), dev_postimage,
+    cudaMemcpy(hst_scene->state.image.data(), dev_GB_normal,
         pixelcount * sizeof(glm::vec3), cudaMemcpyDeviceToHost);
 
     checkCUDAError("pathtrace");
@@ -942,6 +958,7 @@ void pathtraceGetGBuffer()
         dev_vertPos,
         dev_vertNor,
         dev_vertUV,
+        dev_vertSchannel,
         dev_intersections);
     cudaDeviceSynchronize();
     shadeGBufferMaterial << <numblocksPathSegmentTracing, blockSize1d >> > (
