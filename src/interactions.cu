@@ -742,7 +742,7 @@ __host__ __device__ void directLight(
     thrust::default_random_engine& rng)
 {
     glm::vec3 radiance(0.f);
-    glm::vec3 scatterPos = intersect + normal * EPSILON;
+    glm::vec3 scatterPos = intersect + normal * EPSILON * 10.f;
 
     if (lightgeoms_size == 0 || m.type == SPECULAR) { // No sample to light for perfectly specular material
         return;
@@ -758,7 +758,7 @@ __host__ __device__ void directLight(
     Sample_Li(light, scatterPos, lightDir, lightNor, lightDist, pdf_Li, rng);
 
     // check shadow
-    Ray shadowRay = Ray(scatterPos, lightDir);
+    Ray shadowRay = Ray(scatterPos + lightDir * EPSILON * glm::mix(100.f, 10.f, glm::dot(lightDir, normal)), lightDir);
     bool inShadow = getAnyHit(shadowRay, curSchannel, bvhNodes, geoms, geoms_size, lightgeoms, lightgeoms_size, vertexPos, vertexSchannel, lightDist - EPSILON);
 
     if (!inShadow) {
