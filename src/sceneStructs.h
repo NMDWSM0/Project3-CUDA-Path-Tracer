@@ -126,6 +126,13 @@ struct Material
     }
 };
 
+struct RenderLine
+{
+    float ldepth;
+    float oldepth;
+    float alpha;
+    glm::vec3 color;
+};
 
 struct Texture 
 {

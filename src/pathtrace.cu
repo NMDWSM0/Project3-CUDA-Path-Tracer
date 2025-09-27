@@ -59,7 +59,7 @@ static glm::vec3* dev_postimage = nullptr;
 static glm::vec3* dev_GB_position = nullptr;
 static glm::vec3* dev_GB_albedo = nullptr;  // in linear space
 static glm::vec3* dev_GB_normal = nullptr;
-static glm::vec3* dev_lines = nullptr;
+static RenderLine* dev_lines = nullptr;
 // geoms & bvhs
 static Geom* dev_geoms = nullptr;
 static LightGeom* dev_lightgeoms = nullptr;
@@ -115,8 +115,8 @@ void pathtraceInit(Scene* scene)
     cudaMalloc(&dev_GB_normal, pixelcount * sizeof(glm::vec3));
     cudaMemset(dev_GB_normal, 0, pixelcount * sizeof(glm::vec3));
 
-    cudaMalloc(&dev_lines, pixelcount * sizeof(glm::vec3));
-    cudaMemset(dev_lines, 0, pixelcount * sizeof(glm::vec3));
+    cudaMalloc(&dev_lines, pixelcount * sizeof(RenderLine));
+    cudaMemset(dev_lines, 0, pixelcount * sizeof(RenderLine));
 
     cudaMalloc(&dev_paths_A, pixelcount * sizeof(PathSegment));
     cudaMalloc(&dev_paths_B, pixelcount * sizeof(PathSegment));
@@ -250,7 +250,7 @@ void pathtraceClear()
     cudaMemset(dev_GB_position, 0, pixelcount * sizeof(glm::vec3));
     cudaMemset(dev_GB_albedo, 0, pixelcount * sizeof(glm::vec3));
     cudaMemset(dev_GB_normal, 0, pixelcount * sizeof(glm::vec3));
-    cudaMemset(dev_lines, 0, pixelcount * sizeof(glm::vec3));
+    cudaMemset(dev_lines, 0, pixelcount * sizeof(RenderLine));
     cudaMemset(dev_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
 
     checkCUDAError("pathtraceClear");
@@ -300,32 +300,32 @@ __global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution, int iter, glm
     }
 }
 
-//__global__ void blurLinesR(glm::ivec2 resolution, glm::vec3* lines)
-//{
-//    int x = (blockIdx.x * blockDim.x) + threadIdx.x;
-//    int y = (blockIdx.y * blockDim.y) + threadIdx.y;
-//
-//    if (x < resolution.x && y < resolution.y)
-//    {
-//        int index = x + (y * resolution.x);
-//        int cnt = 1;
-//        float rTotal = lines[index].r;
-//#pragma unroll        
-//        for (int i = -1; i <= 1; ++i) {
-//#pragma unroll   
-//            for (int j = -1; j <= 1; ++j) {
-//                int oindex = x + j + ((y + i) * resolution.x);
-//                if (index == oindex) continue;
-//                if (x + j > 0 && x + j < resolution.x && y + i > 0 && y + i < resolution.y) {
-//                    rTotal += lines[oindex].r;
-//                    ++cnt;
-//                }
-//            }
-//        }
-//        rTotal /= cnt;
-//        lines[index].r = rTotal;
-//    }
-//}
+__global__ void blurLinesR(glm::ivec2 resolution, RenderLine* lines)
+{
+    int x = (blockIdx.x * blockDim.x) + threadIdx.x;
+    int y = (blockIdx.y * blockDim.y) + threadIdx.y;
+
+    if (x < resolution.x && y < resolution.y)
+    {
+        int index = x + (y * resolution.x);
+        int cnt = 1;
+        float rTotal = lines[index].alpha;
+#pragma unroll        
+        for (int i = -1; i <= 1; ++i) {
+#pragma unroll   
+            for (int j = -1; j <= 1; ++j) {
+                int oindex = x + j + ((y + i) * resolution.x);
+                if (index == oindex) continue;
+                if (x + j > 0 && x + j < resolution.x && y + i > 0 && y + i < resolution.y) {
+                    rTotal += lines[oindex].alpha;
+                    ++cnt;
+                }
+            }
+        }
+        rTotal /= cnt;
+        lines[index].alpha = rTotal;
+    }
+}
 
 inline __host__ __device__ bool worldToPixel(
     const Camera& cam,
@@ -378,7 +378,8 @@ __global__ void generateGBufferRayFromCamera(Camera cam, PathSegment* pathSegmen
     }
 }
 
-__global__ void generateLineSearchRayFromCamera(Camera cam, PathSegment* pathSegments, glm::vec3* gBufferPos, float lineRadius, float maxRadius, int rayIdx, int rayCount)
+__global__ void generateLineSearchRayFromCamera(Camera cam, PathSegment* pathSegments, glm::vec3* gBufferPos, 
+    float lineRadius, float maxRadius, float layerAlpha, int rayIdx, int rayCount)
 {
     int x = (blockIdx.x * blockDim.x) + threadIdx.x;
     int y = (blockIdx.y * blockDim.y) + threadIdx.y;
@@ -413,8 +414,8 @@ __global__ void generateLineSearchRayFromCamera(Camera cam, PathSegment* pathSeg
         glm::vec3 perpendicularDirection2 =
             glm::normalize(glm::cross(originalDir, perpendicularDirection1));
 
-        float angle = (rayIdx * TWO_PI) / (float)rayCount;
-        float searchRadius = glm::clamp(lineRadius * originalDist, 0.5f * lineRadius, maxRadius);
+        float angle = ((rayIdx + layerAlpha) * TWO_PI) / (float)rayCount;
+        float searchRadius = layerAlpha * glm::clamp(lineRadius * originalDist, lineRadius, maxRadius);
         glm::vec3 targetPos = originalPos
             + cos(angle) * searchRadius * perpendicularDirection1
             + sin(angle) * searchRadius * perpendicularDirection2;
@@ -502,7 +503,7 @@ __global__ void computeIntersections(
     glm::vec3* vertexNor,
     glm::vec2* vertexUV,
     char* vertexSchannel,
-    glm::vec3* lines,
+    RenderLine* lines,
     char* mattypes,
     ShadeableIntersection* intersections,
     int* pathIndices)
@@ -521,7 +522,7 @@ __global__ void computeIntersections(
     glm::vec3* vertexNor,
     glm::vec2* vertexUV,
     char* vertexSchannel,
-    glm::vec3* lines,
+    RenderLine* lines,
     ShadeableIntersection* intersections)
 #endif // PT_MATERIAL_SORT
 {
@@ -565,10 +566,12 @@ __global__ void computeIntersections(
             float dist = glm::length(isectP - cam.position);
             if (worldToPixel(cam, isectP, pixel)) {
                 int pixelIdx = pixel.x + (pixel.y * cam.resolution.x);
-                float lineAlpha = glm::smoothstep(0.0f, 0.6f, lines[pixelIdx].r);
-                float lineDist = lines[pixelIdx].g;
-                if (abs(dist - lineDist) < 0.01f && u01(rng) < lineAlpha) {
+                float lineAlpha = lines[pixelIdx].alpha;
+                lineAlpha = glm::smoothstep(0.001f, 0.25f, lineAlpha);
+                float lineDist = lines[pixelIdx].ldepth;
+                if (u01(rng) < lineAlpha) {
                     isect.materialId = -2 - isect.materialId;
+                    isect.lightEmission = lines[pixelIdx].color;
                 }
             }
 #endif // PT_LINE_RENDER
@@ -640,7 +643,8 @@ __global__ void shadeGBufferMaterial(
     cudaTextureObject_t* textureHandles,
     glm::vec3* gbufferPosition,
     glm::vec3* gbufferAlbedo,
-    glm::vec3* gbufferNormal)
+    glm::vec3* gbufferNormal,
+    RenderLine* lines)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= num_paths) {
@@ -652,6 +656,7 @@ __global__ void shadeGBufferMaterial(
     glm::vec3 pos;
     glm::vec3 albedo;
     glm::vec3 nor;
+    RenderLine line;
     if (intersection.t > 0.0f) {
         glm::vec3 intersectPos = intersection.t * segment.ray.direction + segment.ray.origin;
         pos = intersectPos;
@@ -659,6 +664,7 @@ __global__ void shadeGBufferMaterial(
         {
             albedo = intersection.lightEmission;
             nor = -segment.ray.direction;
+            line.alpha = 0.f; line.ldepth = intersection.t; line.color = glm::vec3(-1.f);
         }
         else {
             glm::vec3 shadingNormal = intersection.surfaceNormal;
@@ -667,16 +673,22 @@ __global__ void shadeGBufferMaterial(
 
             albedo = material.color;
             nor = shadingNormal;
+            line.alpha = 0.f; line.ldepth = intersection.t; line.color = material.linecolor;
+            if (line.color == glm::vec3(0.f)) {
+                line.color = 0.05f * material.color;
+            }
         }
     }
     else {
         pos = 1000000.f * segment.ray.direction + segment.ray.origin;
         albedo = glm::vec3(0.f);
         nor = glm::vec3(0.f);
+        line.alpha = 0.f; line.ldepth = 1000000.f; line.color = glm::vec3(0.f);
     }
     gbufferPosition[pixelIndex] = pos;
     gbufferAlbedo[pixelIndex] = albedo;
     gbufferNormal[pixelIndex] = nor;
+    lines[pixelIndex] = line;
 }
 
 __global__ void shadeLineRenderMaterial(
@@ -687,7 +699,7 @@ __global__ void shadeLineRenderMaterial(
     cudaTextureObject_t* textureHandles,
     glm::vec3* gbufferPosition,
     glm::vec3* gbufferNormal,
-    glm::vec3* lines,
+    RenderLine* lines,
     int rayCount)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -701,11 +713,12 @@ __global__ void shadeLineRenderMaterial(
     glm::vec3 pos;
     glm::vec3 nor;
     float ldepth;
+    glm::vec3 linecolor(-1.f);
     if (intersection.t > 0.0f) {
         ldepth = intersection.t;
         glm::vec3 intersectPos = intersection.t * segment.ray.direction + segment.ray.origin;
         pos = intersectPos;
-        if (intersection.materialId == -1)
+        if (intersection.materialId == -1) // light, no lines
         {
             nor = -segment.ray.direction;
         }
@@ -715,36 +728,51 @@ __global__ void shadeLineRenderMaterial(
             getMatParams(material, intersection, shadingNormal, textureHandles);
 
             nor = shadingNormal;
+            linecolor = material.linecolor;
+            if (linecolor == glm::vec3(0.f)) {
+                linecolor = 0.05f * material.color;
+            }
         }
     }
     else {
         ldepth = 1000000.f;
         pos = 1000000.f * segment.ray.direction + segment.ray.origin;
         nor = glm::vec3(0.f);
+        linecolor = glm::vec3(0.f);
     }
 
     glm::vec3 centerpos = gbufferPosition[pixelIndex];
     glm::vec3 centernor = gbufferNormal[pixelIndex];
     float centerldepth = glm::length(camPos - centerpos);
+    float minldepth = glm::min(ldepth, centerldepth);
 
     // check diff
     bool diff = false;
-    // depth diff
-    float deltaldepth = abs(ldepth - centerldepth);
-    if (ldepth > 100000.f && centerldepth > 100000.f) {
-    }
-    else if (glm::dot(nor, centernor) < 0.99f && deltaldepth > 0.05f) {
-        diff = true;
-    }
-    // nor diff
-    if (glm::length(nor) < 0.1f && glm::length(centernor) < 0.1f) {
-    }
-    else if (glm::dot(nor, centernor) < 0.707f) {
-        diff = true;
-    }
+    if (linecolor.x >= 0.f && lines[pixelIndex].color.x >= 0.0f) {
+        // depth diff
+        float deltaldepth = abs(ldepth - centerldepth);
+        if (ldepth > 100000.f && centerldepth > 100000.f) {
+        }
+        else if (glm::dot(nor, centernor) < 0.99f && (deltaldepth > 0.05f || deltaldepth > minldepth * 0.005f)) {
+            diff = true;
+        }
+        // nor diff
+        if (glm::length(nor) < 0.1f && glm::length(centernor) < 0.1f) {
+        }
+        else if (glm::dot(nor, centernor) < 0.5f) {
+            diff = true;
+        }
 
-    lines[pixelIndex].x += (diff ? 1.f : 0.f) / (float)rayCount;
-    lines[pixelIndex].y = centerldepth;
+        lines[pixelIndex].alpha += (diff ? 1.f : 0.f) / (float)rayCount;
+        if (diff && ldepth < centerldepth) {
+            lines[pixelIndex].color = linecolor;
+        }
+        lines[pixelIndex].oldepth = ldepth;
+    }
+    else {
+        lines[pixelIndex].alpha = 0.f;
+        lines[pixelIndex].color = glm::vec3(-1.f);
+    }
 }
 
 #if PT_MATERIAL_SORT
@@ -832,8 +860,7 @@ __global__ void shadeMaterial(
             // Hit Lines
             if (intersection.materialId <= -2)
             {
-                Material material = materials[-2 - intersection.materialId];
-                segment.color += segment.throughput * 0.5f * (material.linecolor);
+                segment.color += segment.throughput * intersection.lightEmission;
                 segment.remainingBounces = -1;
             }
 #endif // PT_LINE_RENDER
@@ -1176,43 +1203,47 @@ void pathtraceGetGBuffer()
         dev_texurehandles,
         dev_GB_position,
         dev_GB_albedo,
-        dev_GB_normal);
+        dev_GB_normal,
+        dev_lines);
 
     checkCUDAError("gbuffer");
 
     // Line Render Preparation
 #if PT_LINE_RENDER
-    constexpr float lineRadius = 0.002f;
-    constexpr float maxRadius = 0.050f;
-    constexpr float rayCount = 8;
+    constexpr float lineRadius = 0.0015f;
+    constexpr float maxRadius = 0.0150f;
+    constexpr float rayCount = 4;
+    constexpr float layerCount = 4;
     for (int i = 0; i < rayCount; ++i) {
-        cudaMemset(dev_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
-        
-        generateLineSearchRayFromCamera << <blocksPerGrid2d, blockSize2d >> > (cam, dev_paths_A, dev_GB_position, lineRadius, maxRadius, i, rayCount);
-        computeGBufferIntersections << <numblocksPathSegmentTracing, blockSize1d >> > (
-            num_paths,
-            dev_paths_A,
-            dev_bvhnodes,
-            dev_geoms,
-            hst_scene->geoms.size(),
-            dev_lightgeoms,
-            hst_scene->lightgeoms.size(),
-            dev_vertPos,
-            dev_vertNor,
-            dev_vertUV,
-            dev_vertSchannel,
-            dev_intersections);
-        cudaDeviceSynchronize();
-        shadeLineRenderMaterial << <numblocksPathSegmentTracing, blockSize1d >> > (
-            num_paths,
-            dev_paths_A,
-            dev_intersections,
-            dev_materials,
-            dev_texurehandles,
-            dev_GB_position,
-            dev_GB_normal,
-            dev_lines,
-            rayCount);
+        for (int j = 1; j <= layerCount; ++j) {
+            cudaMemset(dev_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
+            float layerAlpha = float(j) / layerCount;
+            generateLineSearchRayFromCamera << <blocksPerGrid2d, blockSize2d >> > (cam, dev_paths_A, dev_GB_position, lineRadius, maxRadius, layerAlpha, i, rayCount);
+            computeGBufferIntersections << <numblocksPathSegmentTracing, blockSize1d >> > (
+                num_paths,
+                dev_paths_A,
+                dev_bvhnodes,
+                dev_geoms,
+                hst_scene->geoms.size(),
+                dev_lightgeoms,
+                hst_scene->lightgeoms.size(),
+                dev_vertPos,
+                dev_vertNor,
+                dev_vertUV,
+                dev_vertSchannel,
+                dev_intersections);
+            cudaDeviceSynchronize();
+            shadeLineRenderMaterial << <numblocksPathSegmentTracing, blockSize1d >> > (
+                num_paths,
+                dev_paths_A,
+                dev_intersections,
+                dev_materials,
+                dev_texurehandles,
+                dev_GB_position,
+                dev_GB_normal,
+                dev_lines,
+                rayCount * layerCount);
+        }
     }
     //blurLinesR << <blocksPerGrid2d, blockSize2d >> > (cam.resolution, dev_lines);
 #endif // PT_LINE_RENDER

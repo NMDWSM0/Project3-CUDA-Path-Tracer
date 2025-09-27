@@ -388,7 +388,13 @@ void loadMaterials(Scene* scene, tinygltf::Model& gltfModel)
         // line color
         material.linecolor = glm::vec3(0.f);
         if (gltfMaterial.extras.Has("my_linecolor")) {
-            //material.linecolor = ;
+            float r = gltfMaterial.extras.Get("my_linecolor").Get(0).GetNumberAsDouble();
+            float g = gltfMaterial.extras.Get("my_linecolor").Get(1).GetNumberAsDouble();
+            float b = gltfMaterial.extras.Get("my_linecolor").Get(2).GetNumberAsDouble();
+            material.linecolor = glm::vec3(r, g, b);
+            if (r > 0.f || g > 0.f || b > 0.f) {
+                material.linecolor = srgbToLinear(material.linecolor);
+            }
         }
 
         scene->materials.push_back(material);
