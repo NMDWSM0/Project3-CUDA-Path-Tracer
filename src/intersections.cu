@@ -158,10 +158,13 @@ __host__ __device__ bool getAnyHit(
             {
                 vertIds = geom.vertIds;
                 char triSchannel = glm::min(vertexSchannel[vertIds[0]], glm::min(vertexSchannel[vertIds[1]], vertexSchannel[vertIds[2]]));
+#if PT_SHADOW_CHANNEL
                 if (!ChannelCheck[curSchannel][triSchannel]) {
                     distance = INFINITY;
                 }
-                else {
+                else
+#endif // PT_SHADOW_CHANNEL
+                {
                     distance = TriangleIntersect(vertexPos[vertIds[0]], vertexPos[vertIds[1]], vertexPos[vertIds[2]], r, barycentricParameters);
                 }
             }
@@ -331,10 +334,13 @@ __host__ __device__ bool getClosestHit(
                 temp_vp1 = vertexPos[temp_vertIds[1]];
                 temp_vp2 = vertexPos[temp_vertIds[2]];
                 triSchannel = glm::min(vertexSchannel[temp_vertIds[0]], glm::min(vertexSchannel[temp_vertIds[1]], vertexSchannel[temp_vertIds[2]]));
+#if PT_SHADOW_CHANNEL
                 if (!ChannelCheck[curSchannel][triSchannel]) {
                     distance = INFINITY;
                 }
-                else {
+                else
+#endif // PT_SHADOW_CHANNEL
+                {
                     distance = TriangleIntersect(temp_vp0, temp_vp1, temp_vp2, r, temp_bary);
                 }
             }

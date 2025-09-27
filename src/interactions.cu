@@ -301,7 +301,7 @@ __host__ __device__ glm::vec3 F_Disney(
     float tmpPdf = 0.f;
     const float VDotH = abs(glm::dot(woW, half));
     // Diffuse
-#if PT_TOON_SHADING
+#if PT_CEL_SHADING
     glm::vec3 diffuse_bsdf(0.f);  // not multiplied by absdot
     if (diffPr > 0.f && reflect) {
         if (NdotL > toonCos) {
@@ -314,7 +314,7 @@ __host__ __device__ glm::vec3 F_Disney(
         bsdf += evaluateDisneyDiffuse(m, woW, wiW, half, ffnormal, tmpPdf) * dielectricWeight;
         pdf += tmpPdf * diffPr;
     }
-#endif // PT_TOON_SHADING
+#endif // PT_CEL_SHADING
 
     // Dielectric Reflection
     if (dielectricPr > 0.f && reflect) {
@@ -354,11 +354,11 @@ __host__ __device__ glm::vec3 F_Disney(
         pdf += tmpPdf * clearCoatPr;
     }
 
-#if PT_TOON_SHADING
+#if PT_CEL_SHADING
     return diffuse_bsdf + bsdf * abs(NdotL);
 #else
     return bsdf * abs(NdotL);  // bsdf * absdot
-#endif // PT_TOON_SHADING
+#endif // PT_CEL_SHADING
 }
 
 
@@ -470,11 +470,11 @@ __host__ __device__ void Sample_f_Disney(
     float r1 = u01(rng) * cdf[4];
     glm::vec3 half;
     if (r1 < cdf[0]) {       // Diffuse
-#if PT_TOON_SHADING
+#if PT_CEL_SHADING
         wiW = uniformSampleAngleHemisphere(ffnormal, toonCos, rng);
 #else
         wiW = cosineSampleHemisphere(ffnormal, rng);
-#endif
+#endif // PT_CEL_SHADING
     }
     else if (r1 < cdf[2]) {  // Dielectric + Metallic reflection
         half = sampleGTR2(m.roughness, ffnormal, rng);
@@ -514,7 +514,7 @@ __host__ __device__ void Sample_f_Disney(
     float tmpPdf = 0.f;
     const float VDotH = abs(glm::dot(woW, half));
     // Diffuse
-#if PT_TOON_SHADING
+#if PT_CEL_SHADING
     glm::vec3 diffuse_bsdf(0.f);  // not multiplied by absdot
     if (diffPr > 0.f && reflect) {
         if (ffNdotL > toonCos) {
@@ -527,7 +527,7 @@ __host__ __device__ void Sample_f_Disney(
         bsdf += evaluateDisneyDiffuse(m, woW, wiW, half, ffnormal, tmpPdf) * dielectricWeight;
         pdf += tmpPdf * diffPr;
     }
-#endif // PT_TOON_SHADING
+#endif // PT_CEL_SHADING
 
     // Dielectric Reflection
     if (dielectricPr > 0.f && reflect) {
@@ -568,7 +568,7 @@ __host__ __device__ void Sample_f_Disney(
     }
 
     if (pdf > 0.f && !isnan(pdf)) {
-#if PT_TOON_SHADING
+#if PT_CEL_SHADING
         pathSegment.throughput *= (diffuse_bsdf + bsdf * abs(ffNdotL)) / pdf;
 #else
         pathSegment.throughput *= bsdf * abs(ffNdotL) / pdf;

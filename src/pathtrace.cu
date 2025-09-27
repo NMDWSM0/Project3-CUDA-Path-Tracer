@@ -59,6 +59,7 @@ static glm::vec3* dev_postimage = nullptr;
 static glm::vec3* dev_GB_position = nullptr;
 static glm::vec3* dev_GB_albedo = nullptr;  // in linear space
 static glm::vec3* dev_GB_normal = nullptr;
+static glm::vec3* dev_lines = nullptr;
 // geoms & bvhs
 static Geom* dev_geoms = nullptr;
 static LightGeom* dev_lightgeoms = nullptr;
@@ -113,6 +114,9 @@ void pathtraceInit(Scene* scene)
 
     cudaMalloc(&dev_GB_normal, pixelcount * sizeof(glm::vec3));
     cudaMemset(dev_GB_normal, 0, pixelcount * sizeof(glm::vec3));
+
+    cudaMalloc(&dev_lines, pixelcount * sizeof(glm::vec3));
+    cudaMemset(dev_lines, 0, pixelcount * sizeof(glm::vec3));
 
     cudaMalloc(&dev_paths_A, pixelcount * sizeof(PathSegment));
     cudaMalloc(&dev_paths_B, pixelcount * sizeof(PathSegment));
@@ -208,6 +212,7 @@ void pathtraceFree()
     cudaFree(dev_GB_position);
     cudaFree(dev_GB_albedo);
     cudaFree(dev_GB_normal);
+    cudaFree(dev_lines);
     cudaFree(dev_paths_A);
     cudaFree(dev_paths_B);
     cudaFree(dev_geoms);
@@ -245,6 +250,7 @@ void pathtraceClear()
     cudaMemset(dev_GB_position, 0, pixelcount * sizeof(glm::vec3));
     cudaMemset(dev_GB_albedo, 0, pixelcount * sizeof(glm::vec3));
     cudaMemset(dev_GB_normal, 0, pixelcount * sizeof(glm::vec3));
+    cudaMemset(dev_lines, 0, pixelcount * sizeof(glm::vec3));
     cudaMemset(dev_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
 
     checkCUDAError("pathtraceClear");
@@ -294,8 +300,62 @@ __global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution, int iter, glm
     }
 }
 
+//__global__ void blurLinesR(glm::ivec2 resolution, glm::vec3* lines)
+//{
+//    int x = (blockIdx.x * blockDim.x) + threadIdx.x;
+//    int y = (blockIdx.y * blockDim.y) + threadIdx.y;
+//
+//    if (x < resolution.x && y < resolution.y)
+//    {
+//        int index = x + (y * resolution.x);
+//        int cnt = 1;
+//        float rTotal = lines[index].r;
+//#pragma unroll        
+//        for (int i = -1; i <= 1; ++i) {
+//#pragma unroll   
+//            for (int j = -1; j <= 1; ++j) {
+//                int oindex = x + j + ((y + i) * resolution.x);
+//                if (index == oindex) continue;
+//                if (x + j > 0 && x + j < resolution.x && y + i > 0 && y + i < resolution.y) {
+//                    rTotal += lines[oindex].r;
+//                    ++cnt;
+//                }
+//            }
+//        }
+//        rTotal /= cnt;
+//        lines[index].r = rTotal;
+//    }
+//}
 
-__global__ void generateGBufferRayFromCamera(Camera cam, PathSegment* pathSegments)
+inline __host__ __device__ bool worldToPixel(
+    const Camera& cam,
+    const glm::vec3& P,
+    glm::ivec2& outPx)
+{
+    const glm::vec3 d = P - cam.position;
+    const float z = glm::dot(d, cam.view);
+
+    if (z <= 0.0f) return false;
+
+    const float u = glm::dot(d, cam.right);
+    const float v = glm::dot(d, cam.up);
+
+    const float x_img = -(u / z);
+    const float y_img = -(v / z);
+
+    const float cx = 0.5f * (cam.resolution.x);
+    const float cy = 0.5f * (cam.resolution.y);
+
+    const float px = x_img / cam.pixelLength.x + cx;
+    const float py = y_img / cam.pixelLength.y + cy;
+
+    outPx = { glm::floor(px + 0.5f), glm::floor(py + 0.5f) };
+
+    return (px >= -0.5f && px <= cam.resolution.x - 0.5f &&
+        py >= -0.5f && py <= cam.resolution.y - 0.5f);
+}
+
+__global__ void generateGBufferRayFromCamera(Camera cam, PathSegment* pathSegments, glm::vec2 offset)
 {
     int x = (blockIdx.x * blockDim.x) + threadIdx.x;
     int y = (blockIdx.y * blockDim.y) + threadIdx.y;
@@ -308,12 +368,62 @@ __global__ void generateGBufferRayFromCamera(Camera cam, PathSegment* pathSegmen
         segment.color = glm::vec3(0.f);
 
         segment.ray.direction = glm::normalize(cam.view
-            - cam.right * cam.pixelLength.x * ((float)x - (float)cam.resolution.x * 0.5f)
-            - cam.up * cam.pixelLength.y * ((float)y - (float)cam.resolution.y * 0.5f)
+            - cam.right * cam.pixelLength.x * ((float)x - (float)cam.resolution.x * 0.5f + offset.x)
+            - cam.up * cam.pixelLength.y * ((float)y - (float)cam.resolution.y * 0.5f + offset.y)
         );
 
         segment.pixelIndex = index;
         segment.remainingBounces = 1;
+        segment.schannel = 0;
+    }
+}
+
+__global__ void generateLineSearchRayFromCamera(Camera cam, PathSegment* pathSegments, glm::vec3* gBufferPos, float lineRadius, float maxRadius, int rayIdx, int rayCount)
+{
+    int x = (blockIdx.x * blockDim.x) + threadIdx.x;
+    int y = (blockIdx.y * blockDim.y) + threadIdx.y;
+    if (x < cam.resolution.x && y < cam.resolution.y) {
+        int index = x + (y * cam.resolution.x);
+        PathSegment& segment = pathSegments[index];
+
+        segment.ray.origin = cam.position;
+        segment.throughput = glm::vec3(1.0f);
+        segment.color = glm::vec3(0.f);
+
+        glm::vec3 originalPos = gBufferPos[index];
+        glm::vec3 originalDir = glm::normalize(segment.ray.origin - originalPos);
+        float originalDist = glm::length(segment.ray.origin - originalPos);
+        glm::vec3 directionNotDir;
+        if (abs(originalDir.x) < SQRT_OF_ONE_THIRD)
+        {
+            directionNotDir = glm::vec3(1, 0, 0);
+        }
+        else if (abs(originalDir.y) < SQRT_OF_ONE_THIRD)
+        {
+            directionNotDir = glm::vec3(0, 1, 0);
+        }
+        else
+        {
+            directionNotDir = glm::vec3(0, 0, 1);
+        }
+
+        // Use not-normal direction to generate two perpendicular directions
+        glm::vec3 perpendicularDirection1 =
+            glm::normalize(glm::cross(originalDir, directionNotDir));
+        glm::vec3 perpendicularDirection2 =
+            glm::normalize(glm::cross(originalDir, perpendicularDirection1));
+
+        float angle = (rayIdx * TWO_PI) / (float)rayCount;
+        float searchRadius = glm::clamp(lineRadius * originalDist, 0.5f * lineRadius, maxRadius);
+        glm::vec3 targetPos = originalPos
+            + cos(angle) * searchRadius * perpendicularDirection1
+            + sin(angle) * searchRadius * perpendicularDirection2;
+
+        segment.ray.direction = glm::normalize(targetPos - segment.ray.origin);
+
+        segment.pixelIndex = index;
+        segment.remainingBounces = 1;
+        segment.schannel = 0;
     }
 }
 
@@ -378,6 +488,7 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
 
 #if PT_MATERIAL_SORT
 __global__ void computeIntersections(
+    Camera cam,
     int iter,
     int depth,
     int num_paths,
@@ -391,11 +502,13 @@ __global__ void computeIntersections(
     glm::vec3* vertexNor,
     glm::vec2* vertexUV,
     char* vertexSchannel,
+    glm::vec3* lines,
     char* mattypes,
     ShadeableIntersection* intersections,
     int* pathIndices)
 #else
 __global__ void computeIntersections(
+    Camera cam,
     int depth,
     int num_paths,
     PathSegment* pathSegments,
@@ -408,6 +521,7 @@ __global__ void computeIntersections(
     glm::vec3* vertexNor,
     glm::vec2* vertexUV,
     char* vertexSchannel,
+    glm::vec3* lines,
     ShadeableIntersection* intersections)
 #endif // PT_MATERIAL_SORT
 {
@@ -444,13 +558,27 @@ __global__ void computeIntersections(
         }
         else
         {
+#if PT_LINE_RENDER
+            // modify isect by checking line intersection
+            glm::ivec2 pixel;
+            glm::vec3 isectP = ray.origin + isect.t * ray.direction;
+            float dist = glm::length(isectP - cam.position);
+            if (worldToPixel(cam, isectP, pixel)) {
+                int pixelIdx = pixel.x + (pixel.y * cam.resolution.x);
+                float lineAlpha = glm::smoothstep(0.0f, 0.6f, lines[pixelIdx].r);
+                float lineDist = lines[pixelIdx].g;
+                if (abs(dist - lineDist) < 0.01f && u01(rng) < lineAlpha) {
+                    isect.materialId = -2 - isect.materialId;
+                }
+            }
+#endif // PT_LINE_RENDER
             // The ray hits something
             intersections[path_index] = isect;
             // write mat type, considering rr, paths to terminate will flag their mat type with TER_
-            char mattype = isect.materialId >= 0 ? mattypes[isect.materialId] : LIGHT;
+            char mattype = isect.materialId >= 0 ? mattypes[isect.materialId] : (isect.materialId == -1 ? LIGHT : LINES);
 #if PT_RUSSIAN_ROULETTE
             constexpr char TER_OFFSET = DIFFUSE - TER_DIFFUSE;
-            if (rand > q && mattype != LIGHT) {
+            if (rand > q && mattype != LIGHT && mattype != LINES) {
                 mattype += TER_OFFSET;
             }
 #endif // PT_RUSSIAN_ROULETTE
@@ -551,6 +679,73 @@ __global__ void shadeGBufferMaterial(
     gbufferNormal[pixelIndex] = nor;
 }
 
+__global__ void shadeLineRenderMaterial(
+    int num_paths,
+    PathSegment* pathSegments,
+    ShadeableIntersection* shadeableIntersections,
+    Material* materials,
+    cudaTextureObject_t* textureHandles,
+    glm::vec3* gbufferPosition,
+    glm::vec3* gbufferNormal,
+    glm::vec3* lines,
+    int rayCount)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= num_paths) {
+        return;
+    }
+    PathSegment& segment = pathSegments[idx];
+    ShadeableIntersection& intersection = shadeableIntersections[idx];
+    int pixelIndex = segment.pixelIndex;
+    glm::vec3 camPos = segment.ray.origin;
+    glm::vec3 pos;
+    glm::vec3 nor;
+    float ldepth;
+    if (intersection.t > 0.0f) {
+        ldepth = intersection.t;
+        glm::vec3 intersectPos = intersection.t * segment.ray.direction + segment.ray.origin;
+        pos = intersectPos;
+        if (intersection.materialId == -1)
+        {
+            nor = -segment.ray.direction;
+        }
+        else {
+            glm::vec3 shadingNormal = intersection.surfaceNormal;
+            Material material = materials[intersection.materialId];
+            getMatParams(material, intersection, shadingNormal, textureHandles);
+
+            nor = shadingNormal;
+        }
+    }
+    else {
+        ldepth = 1000000.f;
+        pos = 1000000.f * segment.ray.direction + segment.ray.origin;
+        nor = glm::vec3(0.f);
+    }
+
+    glm::vec3 centerpos = gbufferPosition[pixelIndex];
+    glm::vec3 centernor = gbufferNormal[pixelIndex];
+    float centerldepth = glm::length(camPos - centerpos);
+
+    // check diff
+    bool diff = false;
+    // depth diff
+    float deltaldepth = abs(ldepth - centerldepth);
+    if (ldepth > 100000.f && centerldepth > 100000.f) {
+    }
+    else if (glm::dot(nor, centernor) < 0.99f && deltaldepth > 0.05f) {
+        diff = true;
+    }
+    // nor diff
+    if (glm::length(nor) < 0.1f && glm::length(centernor) < 0.1f) {
+    }
+    else if (glm::dot(nor, centernor) < 0.707f) {
+        diff = true;
+    }
+
+    lines[pixelIndex].x += (diff ? 1.f : 0.f) / (float)rayCount;
+    lines[pixelIndex].y = centerldepth;
+}
 
 #if PT_MATERIAL_SORT
 __global__ void shadeMaterial(
@@ -633,6 +828,15 @@ __global__ void shadeMaterial(
                 segment.color += misWeight * segment.throughput * intersection.lightEmission;
                 segment.remainingBounces = -1;
             }
+#if PT_LINE_RENDER
+            // Hit Lines
+            if (intersection.materialId <= -2)
+            {
+                Material material = materials[-2 - intersection.materialId];
+                segment.color += segment.throughput * 0.5f * (material.linecolor);
+                segment.remainingBounces = -1;
+            }
+#endif // PT_LINE_RENDER
             // Otherwise, Hit Geom.
             else
             {
@@ -752,6 +956,7 @@ void pathtrace(uchar4* pbo, int maxiter, int iter)
         dim3 numblocksPathSegmentTracing = (num_paths + blockSize1d - 1) / blockSize1d;
 #if PT_MATERIAL_SORT
         computeIntersections << <numblocksPathSegmentTracing, blockSize1d >> > (
+            cam,
             iter,
             depth,
             num_paths,
@@ -765,12 +970,14 @@ void pathtrace(uchar4* pbo, int maxiter, int iter)
             dev_vertNor,
             dev_vertUV,
             dev_vertSchannel,
+            dev_lines,
             dev_mattypes,
             dev_intersections,
             dev_pathindices
             );
 #else
         computeIntersections << <numblocksPathSegmentTracing, blockSize1d >> > (
+            cam,
             depth,
             num_paths,
             dev_paths,
@@ -783,6 +990,7 @@ void pathtrace(uchar4* pbo, int maxiter, int iter)
             dev_vertNor,
             dev_vertUV,
             dev_vertSchannel,
+            dev_lines,
             dev_intersections
             );
 #endif // PT_MATERIAL_SORT
@@ -910,7 +1118,7 @@ void pathtrace(uchar4* pbo, int maxiter, int iter)
 #endif // PT_DENOISE
 
     // Retrieve image from GPU
-    cudaMemcpy(hst_scene->state.image.data(), dev_postimage,
+    cudaMemcpy(hst_scene->state.image.data(), dev_postimage, // dev_postimage
         pixelcount * sizeof(glm::vec3), cudaMemcpyDeviceToHost);
 
     checkCUDAError("pathtrace");
@@ -933,13 +1141,12 @@ void pathtraceGetGBuffer()
     ///////////////////////////////////////////////////////////////////////////
    // Start Tracing
    // Generate rays first
-    generateGBufferRayFromCamera << <blocksPerGrid2d, blockSize2d >> > (cam, dev_paths_A);
+    generateGBufferRayFromCamera << <blocksPerGrid2d, blockSize2d >> > (cam, dev_paths_A, glm::vec2(0.114514f, -0.1919810f));
     checkCUDAError("generate camera ray");
 
     int depth = 0;
     PathSegment* dev_path_end = dev_paths_A + pixelcount;
     int num_paths = dev_path_end - dev_paths_A;
-    int last_num_paths = num_paths;
 
     // clean shading chunks
     cudaMemset(dev_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
@@ -972,4 +1179,41 @@ void pathtraceGetGBuffer()
         dev_GB_normal);
 
     checkCUDAError("gbuffer");
+
+    // Line Render Preparation
+#if PT_LINE_RENDER
+    constexpr float lineRadius = 0.002f;
+    constexpr float maxRadius = 0.050f;
+    constexpr float rayCount = 8;
+    for (int i = 0; i < rayCount; ++i) {
+        cudaMemset(dev_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
+        
+        generateLineSearchRayFromCamera << <blocksPerGrid2d, blockSize2d >> > (cam, dev_paths_A, dev_GB_position, lineRadius, maxRadius, i, rayCount);
+        computeGBufferIntersections << <numblocksPathSegmentTracing, blockSize1d >> > (
+            num_paths,
+            dev_paths_A,
+            dev_bvhnodes,
+            dev_geoms,
+            hst_scene->geoms.size(),
+            dev_lightgeoms,
+            hst_scene->lightgeoms.size(),
+            dev_vertPos,
+            dev_vertNor,
+            dev_vertUV,
+            dev_vertSchannel,
+            dev_intersections);
+        cudaDeviceSynchronize();
+        shadeLineRenderMaterial << <numblocksPathSegmentTracing, blockSize1d >> > (
+            num_paths,
+            dev_paths_A,
+            dev_intersections,
+            dev_materials,
+            dev_texurehandles,
+            dev_GB_position,
+            dev_GB_normal,
+            dev_lines,
+            rayCount);
+    }
+    //blurLinesR << <blocksPerGrid2d, blockSize2d >> > (cam.resolution, dev_lines);
+#endif // PT_LINE_RENDER
 }

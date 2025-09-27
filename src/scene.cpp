@@ -385,6 +385,12 @@ void loadMaterials(Scene* scene, tinygltf::Model& gltfModel)
             material.subsurface = (float)(gltfMaterial.extras.Get("my_subsurface").Get<double>());
         }
 
+        // line color
+        material.linecolor = glm::vec3(0.f);
+        if (gltfMaterial.extras.Has("my_linecolor")) {
+            //material.linecolor = ;
+        }
+
         scene->materials.push_back(material);
     }
 
@@ -538,6 +544,7 @@ void Scene::loadFromJSON(const std::string& jsonName)
 
             const auto& center = p["POSITION"];
             const auto& size = p["SIZE"];
+            int schannel = p.value("SCHANNEL", 0);
             glm::vec3 centervec(center[0], center[1], center[2]);
             glm::vec3 sizevec(size[0], size[1], size[2]);
             std::vector<glm::vec3> posarray;
@@ -594,6 +601,7 @@ void Scene::loadFromJSON(const std::string& jsonName)
                     vertPos.push_back(posarray[boxTriangles[i][j]]);
                     vertNor.push_back(boxNormals[i]);
                     vertUV.push_back(faceUVs[(i & 1) + j]);
+                    vertSchannel.push_back(static_cast<char>(schannel));
                 }
 
                 newGeom.materialid = MatNameToID[p["MATERIAL"]];

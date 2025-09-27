@@ -35,6 +35,7 @@ enum MatType
     TER_SPECULAR,
     TER_DISNEY,
     LIGHT,
+    LINES,
     NONE_MAT
 };
 
@@ -98,6 +99,7 @@ struct Material
     MatType type;
     glm::vec3 color;
     glm::vec3 emission;
+    glm::vec3 linecolor;
     float roughness;
     float metallic;
     float transmission;
