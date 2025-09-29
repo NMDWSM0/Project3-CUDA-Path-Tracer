@@ -340,6 +340,9 @@ void loadMaterials(Scene* scene, tinygltf::Model& gltfModel)
 
         // Normal Map
         material.normalmapTexId = gltfMaterial.normalTexture.index + sceneTexIdx;
+        if (gltfMaterial.normalTexture.scale >= 0) {
+            material.normalStrength = gltfMaterial.normalTexture.scale;
+        }
 
         // KHR_materials_transmission
         material.transmission = 0.f;
@@ -372,11 +375,12 @@ void loadMaterials(Scene* scene, tinygltf::Model& gltfModel)
         }
 
         // KHR_materials_emissive_strength
+        material.emissionStrength = 1.f;
         if (gltfMaterial.extensions.find("KHR_materials_emissive_strength") != gltfMaterial.extensions.end())
         {
             const auto& ext = gltfMaterial.extensions.at("KHR_materials_emissive_strength");
             if (ext.Has("emissiveStrength"))
-                material.emission *= (float)(ext.Get("emissiveStrength").Get<double>());
+                material.emissionStrength = (float)(ext.Get("emissiveStrength").Get<double>());
         }
 
         // my_subsurface

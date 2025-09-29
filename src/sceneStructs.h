@@ -107,12 +107,14 @@ struct Material
     float clearcoat;
     float coatroughness;
     float subsurface;
+    float emissionStrength;
+    float normalStrength;
     int baseColorTexId;
     int metallicRoughnessTexId;
     int normalmapTexId;
     int emissionmapTexId;
 
-    __host__ __device__ Material() : type(DIFFUSE), color(1.f), baseColorTexId(-1), metallicRoughnessTexId(-1), normalmapTexId(-1), emissionmapTexId(-1) {};
+    __host__ __device__ Material() : type(DIFFUSE), color(1.f), normalStrength(1.f), baseColorTexId(-1), metallicRoughnessTexId(-1), normalmapTexId(-1), emissionmapTexId(-1) {};
 
     __host__ __device__ Material(const Material& other) {
         std::memcpy(this, &other, sizeof(Material));

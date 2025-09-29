@@ -1210,8 +1210,8 @@ void pathtraceGetGBuffer()
 
     // Line Render Preparation
 #if PT_LINE_RENDER
-    constexpr float lineRadius = 0.0015f;
-    constexpr float maxRadius = 0.0150f;
+    constexpr float lineRadius = 0.0012f;
+    constexpr float maxRadius = 0.0120f;
     constexpr float rayCount = 4;
     constexpr float layerCount = 4;
     for (int i = 0; i < rayCount; ++i) {

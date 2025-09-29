@@ -802,11 +802,15 @@ __device__ void getMatParams(
         normal_tspace.y = 1.f - normal_tspace.y;
 #endif
         normal_tspace = glm::normalize(normal_tspace * 2.f - 1.f);
+        normal_tspace.x *= mat.normalStrength;
+        normal_tspace.y *= mat.normalStrength;
+        normal_tspace = glm::normalize(normal_tspace);
         glm::vec3 bitangent = glm::cross(intersect.surfaceNormal, intersect.tangent);
         normal = glm::normalize(intersect.tangent * normal_tspace.x + bitangent * normal_tspace.y + intersect.surfaceNormal * normal_tspace.z);
     }
     if (mat.emissionmapTexId >= 0) {
         float4 c = tex2D<float4>(textureHandles[mat.emissionmapTexId], uv.x, uv.y);
         mat.emission = glm::vec3(c.x, c.y, c.z);
+        mat.emission * -mat.emissionStrength;
     }
 }
