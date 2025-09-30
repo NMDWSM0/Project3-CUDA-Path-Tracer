@@ -793,7 +793,7 @@ __device__ void getMatParams(
     if (mat.metallicRoughnessTexId >= 0) {
         float4 matrgh = tex2D<float4>(textureHandles[mat.metallicRoughnessTexId], uv.x, uv.y);
         mat.metallic = matrgh.x;
-        mat.roughness = glm::max(matrgh.y, 0.001f);
+        mat.roughness = glm::max(matrgh.y * matrgh.y, 0.001f);
     }
     if (mat.normalmapTexId >= 0) {
         float4 c = tex2D<float4>(textureHandles[mat.normalmapTexId], uv.x, uv.y);
@@ -810,7 +810,11 @@ __device__ void getMatParams(
     }
     if (mat.emissionmapTexId >= 0) {
         float4 c = tex2D<float4>(textureHandles[mat.emissionmapTexId], uv.x, uv.y);
-        mat.emission = glm::vec3(c.x, c.y, c.z);
-        mat.emission * -mat.emissionStrength;
+        mat.emission = srgbToLinear(glm::vec3(c.x, c.y, c.z));
+        mat.emission *= mat.emissionStrength;
+    }
+    if (mat.transmissionmapTexId >= 0) {
+        float4 c = tex2D<float4>(textureHandles[mat.transmissionmapTexId], uv.x, uv.y);
+        mat.transmission = glm::clamp(c.x, 0.f, 1.f);
     }
 }

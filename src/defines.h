@@ -32,7 +32,7 @@
 #define PT_USEBVH 1
 
 // toon shading
-#define PT_TOON_SHADING 1
+#define PT_TOON_SHADING 0
 
 #if PT_TOON_SHADING
 #define PT_CEL_SHADING 1

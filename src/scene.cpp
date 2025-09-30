@@ -21,6 +21,17 @@
 using namespace std;
 using json = nlohmann::json;
 
+struct GLTFMeshPrim {
+    std::vector<glm::vec3> vertices;
+    std::vector<glm::vec3> normals;
+    std::vector<glm::vec2> uvs;
+    std::vector<char> schannels;
+    std::vector<int> indices;
+    int sceneMatIdx;
+};
+
+static std::map<int, std::vector<GLTFMeshPrim>> MeshPrims;
+
 Scene::Scene(string filename)
 {
     cout << "Reading scene from " << filename << " ..." << endl;
@@ -38,6 +49,18 @@ Scene::Scene(string filename)
     }
 }
 
+static struct MeshInstance {
+    int node = -1;
+    int mesh = -1;
+    glm::mat4 world{ 1.0f };
+};
+
+static struct CameraInstance {
+    int node = -1;
+    int camera = -1;
+    glm::mat4 world{ 1.0f };
+};
+
 static inline glm::mat4 LocalOf(const tinygltf::Node& n) {
     if (n.matrix.size() == 16) {
         return glm::make_mat4(reinterpret_cast<const float*>(n.matrix.data()));
@@ -53,39 +76,39 @@ static inline glm::mat4 LocalOf(const tinygltf::Node& n) {
     return glm::translate(glm::mat4(1.0f), T) * glm::mat4_cast(R) * glm::scale(glm::mat4(1.0f), S); // T*R*S
 }
 
-static struct MeshInstance {
-    int node = -1;
-    int mesh = -1;
-    glm::mat4 world{ 1.0f };
-};
-
-static void DFS(const tinygltf::Model& m, int ni, const glm::mat4& parent, std::vector<MeshInstance>& out) {
+static void DFS(const tinygltf::Model& m, int ni, const glm::mat4& parent, std::vector<MeshInstance>& out, std::vector<CameraInstance>& outcams) {
     const auto& n = m.nodes[ni];
     glm::mat4 world = parent * LocalOf(n);
-    if (n.mesh >= 0) 
+    if (n.mesh >= 0)
         out.push_back({ ni, n.mesh, world });
+    else if (n.camera >= 0)
+        outcams.push_back({ni, n.camera, world});
     for (int c : n.children) 
-        DFS(m, c, world, out);
+        DFS(m, c, world, out, outcams);
 }
 
-static std::vector<MeshInstance> CollectInstancesOneScene(const tinygltf::Model& model) {
-    std::vector<MeshInstance> inst;
+static void CollectInstancesOneScene(const tinygltf::Model& model, std::vector<MeshInstance>& out, std::vector<CameraInstance>& outcams) {
     const int s = (model.defaultScene >= 0) ? model.defaultScene : 0;
     for (int root : model.scenes[s].nodes) 
-        DFS(model, root, glm::mat4(1.0f), inst);
-    return inst;
+        DFS(model, root, glm::mat4(1.0f), out, outcams);
 }
 
-static void loadMeshes(Scene* scene, tinygltf::Model& gltfModel, const glm::mat4& inputTransform)
+//static void loadMeshes(Scene* scene, tinygltf::Model& gltfModel, const glm::mat4& inputTransform)
+static void loadMeshes(Scene* scene, tinygltf::Model& gltfModel)
 {
-    glm::mat3 normalTransform = glm::inverseTranspose(glm::mat3(inputTransform));
+    //glm::mat3 normalTransform = glm::inverseTranspose(glm::mat3(inputTransform));
     for (int gltfMeshIdx = 0; gltfMeshIdx < gltfModel.meshes.size(); gltfMeshIdx++)
     {
         tinygltf::Mesh gltfMesh = gltfModel.meshes[gltfMeshIdx];
+        // add a new mesh
+        // initialize prims vector (a mesh can have multiple prims)
+        std::vector<GLTFMeshPrim> GLTF_prims;
 
         for (int gltfPrimIdx = 0; gltfPrimIdx < gltfMesh.primitives.size(); gltfPrimIdx++)
         {
             tinygltf::Primitive prim = gltfMesh.primitives[gltfPrimIdx];
+            GLTF_prims.push_back(GLTFMeshPrim());
+            GLTFMeshPrim& meshprim = GLTF_prims[GLTF_prims.size() - 1];
 
             // Skip points and lines
             if (prim.mode != TINYGLTF_MODE_TRIANGLES)
@@ -181,10 +204,10 @@ static void loadMeshes(Scene* scene, tinygltf::Model& gltfModel, const glm::mat4
                     schannelStride = schannelBufferView.byteStride;
             }
 
-            std::vector<glm::vec3> vertices;
-            std::vector<glm::vec3> normals;
-            std::vector<glm::vec2> uvs;
-            std::vector<char> schannels;
+            std::vector<glm::vec3>& vertices = meshprim.vertices;
+            std::vector<glm::vec3>& normals = meshprim.normals;
+            std::vector<glm::vec2>& uvs = meshprim.uvs;
+            std::vector<char>& schannels = meshprim.schannels;
 
             // Get vertex data
             for (size_t vertexIndex = 0; vertexIndex < positionAccessor.count; vertexIndex++)
@@ -216,8 +239,8 @@ static void loadMeshes(Scene* scene, tinygltf::Model& gltfModel, const glm::mat4
                     memcpy(&schannel, address, sizeof(float));
                 }
 
-                vertices.push_back(glm::vec3(inputTransform * glm::vec4(vertex, 1.0f)));
-                normals.push_back(glm::normalize(normalTransform * normal));
+                vertices.push_back(vertex);
+                normals.push_back(normal);
                 uvs.push_back(uv);
                 schannels.push_back(static_cast<char>((int)schannel));
             }
@@ -255,22 +278,48 @@ static void loadMeshes(Scene* scene, tinygltf::Model& gltfModel, const glm::mat4
             {
                 memcpy(indices.data(), baseAddress, (indexAccessor.count * indexStride));
             }
+            meshprim.indices = std::move(indices);
+            meshprim.sceneMatIdx = prim.material + scene->materials.size();
+        }
 
-            // push geometrys, be careful at mat/vert index offset
-            int vertBase = scene->vertPos.size();
-            int sceneMatIdx = prim.material + scene->materials.size();
-            for (int tid = 0; tid * 3 < indices.size(); ++tid) {
-                Geom newGeom(TRIANGLE);
-                newGeom.vertIds = glm::ivec3(indices[3 * tid], indices[3 * tid + 1], indices[3 * tid + 2]) + glm::ivec3(vertBase);
-                newGeom.materialid = sceneMatIdx;
-                scene->geoms.push_back(newGeom);
+        // then push those prims
+        MeshPrims[gltfMeshIdx] = std::move(GLTF_prims);
+    }
+}
+
+static void loadMeshInstances(Scene* scene, const std::vector<MeshInstance>& instances, const glm::mat4& inputTransform) {
+    for (auto& instance : instances) {
+        glm::mat4 positionTransform = inputTransform * instance.world;
+        glm::mat3 normalTransform = glm::inverseTranspose(glm::mat3(positionTransform));
+
+        // instance the mesh to scene
+        std::vector<GLTFMeshPrim>& GLTF_prims = MeshPrims[instance.mesh];
+        // instance all prims in this mesh
+        for (auto& prim : GLTF_prims) 
+        {
+			// push geometrys, be careful at mat/vert index offset
+			int vertBase = scene->vertPos.size();
+			int sceneMatIdx = prim.sceneMatIdx;
+			for (int tid = 0; tid * 3 < prim.indices.size(); ++tid) {
+				Geom newGeom(TRIANGLE);
+				newGeom.vertIds = glm::ivec3(prim.indices[3 * tid], prim.indices[3 * tid + 1], prim.indices[3 * tid + 2]) + glm::ivec3(vertBase);
+				newGeom.materialid = sceneMatIdx;
+				scene->geoms.push_back(newGeom);
+			}
+
+			// push pos, nor and uv
+			scene->vertPos.insert(scene->vertPos.end(), prim.vertices.begin(), prim.vertices.end());
+			scene->vertNor.insert(scene->vertNor.end(), prim.normals.begin(), prim.normals.end());
+			scene->vertUV.insert(scene->vertUV.end(), prim.uvs.begin(), prim.uvs.end());
+			scene->vertSchannel.insert(scene->vertSchannel.end(), prim.schannels.begin(), prim.schannels.end());
+
+            // apply transforms for positions and normals
+            int last_index = scene->vertPos.size();
+            int first_index = last_index - prim.vertices.size();
+            for (int i = first_index; i < last_index; ++i) {
+                scene->vertPos[i] = glm::vec3(positionTransform * glm::vec4(scene->vertPos[i], 1.0f));
+                scene->vertNor[i] = glm::normalize(normalTransform * scene->vertNor[i]);
             }
-
-            // push pos, nor and uv
-            scene->vertPos.insert(scene->vertPos.end(), vertices.begin(), vertices.end());
-            scene->vertNor.insert(scene->vertNor.end(), normals.begin(), normals.end());
-            scene->vertUV.insert(scene->vertUV.end(), uvs.begin(), uvs.end());
-            scene->vertSchannel.insert(scene->vertSchannel.end(), schannels.begin(), schannels.end());
         }
     }
 }
@@ -334,6 +383,7 @@ void loadMaterials(Scene* scene, tinygltf::Model& gltfModel)
 
         // Roughness and Metallic
         material.roughness = (float)pbr.roughnessFactor;
+        material.roughness = glm::clamp(material.roughness * material.roughness, 0.001f, 1.f);
         material.metallic = (float)pbr.metallicFactor;
         if (pbr.metallicRoughnessTexture.index > -1)
             material.metallicRoughnessTexId = pbr.metallicRoughnessTexture.index + sceneTexIdx;
@@ -351,6 +401,8 @@ void loadMaterials(Scene* scene, tinygltf::Model& gltfModel)
             const auto& ext = gltfMaterial.extensions.at("KHR_materials_transmission");
             if (ext.Has("transmissionFactor"))
                 material.transmission = (float)(ext.Get("transmissionFactor").Get<double>());
+            if (ext.Has("transmissionTexture"))
+                material.transmissionmapTexId = ext.Get("transmissionTexture").Get("index").Get<int>() + sceneTexIdx;
         }
 
         // KHR_materials_ior
@@ -412,6 +464,39 @@ void loadMaterials(Scene* scene, tinygltf::Model& gltfModel)
     }
 }
 
+void loadCamera(Scene* scene, tinygltf::Model& gltfModel, const std::vector<CameraInstance>& caminstances) {
+    if (caminstances.size() > 0) {
+        const auto& caminst = caminstances[0];
+        const auto& _cam = gltfModel.cameras[caminst.camera];  // load the first camera
+        if (_cam.type == "perspective") {
+            const auto& cam = _cam.perspective;
+            const auto& transform = caminst.world;
+            glm::vec3 position = glm::vec3(transform[3]);
+            glm::vec3 right = glm::normalize(glm::vec3(transform[0]));
+            glm::vec3 up = glm::normalize(glm::vec3(transform[1]));
+            glm::vec3 forward = -glm::normalize(glm::vec3(transform[2]));
+            glm::vec3 lookAt = position + forward;
+            // position and rotation
+            scene->state.camera.position = position;
+            scene->state.camera.lookAt = lookAt;
+            scene->state.camera.up = up;
+            scene->state.camera.view = forward;
+            scene->state.camera.right = glm::normalize(glm::cross(scene->state.camera.view, scene->state.camera.up));
+            // calculate fov based on resolution
+            float fovy = cam.yfov;
+            float yscaled = tan(fovy * 0.5f);
+            float xscaled = (yscaled * scene->state.camera.resolution.x) / scene->state.camera.resolution.y;
+            float fovx = atan(xscaled);
+            scene->state.camera.fov = glm::vec2(fovx, fovy);
+            scene->state.camera.pixelLength = glm::vec2(2 * xscaled / (float)scene->state.camera.resolution.x,
+                2 * yscaled / (float)scene->state.camera.resolution.y);
+        }
+        else {
+            // don't load that
+        }
+    }
+}
+
 void Scene::loadFromGLTF(const std::string& fileName, const glm::mat4& inputTransform)
 {
     std::string ext = fileName.substr(fileName.find_last_of(".") + 1);
@@ -434,13 +519,17 @@ void Scene::loadFromGLTF(const std::string& fileName, const glm::mat4& inputTran
         exit(-1);
     }
 
-    auto instance = CollectInstancesOneScene(model);
-    assert(instance.size() > 0, "should have at least 1 instance in the scene");
-    glm::mat4 instTransform = instance[0].world;
+    std::vector<MeshInstance> meshinstances;
+    std::vector<CameraInstance> camerainstances;
+    CollectInstancesOneScene(model, meshinstances, camerainstances);
+    assert(meshinstances.size() > 0, "should have at least 1 instance in the scene");
 
-    loadMeshes(this, model, inputTransform * instTransform);
+    MeshPrims.clear(); // clear meshes, prevent reading previous mesh idx from other gltf files
+    loadMeshes(this, model);
+    loadMeshInstances(this, meshinstances, inputTransform);
     loadMaterials(this, model);
     loadTextures(this, model);
+    loadCamera(this, model, camerainstances);
 }
 
 void Scene::loadFromJSON(const std::string& jsonName)
@@ -456,6 +545,55 @@ void Scene::loadFromJSON(const std::string& jsonName)
 
     std::ifstream f(jsonName);
     json data = json::parse(f);
+
+    // Camera ans State settings
+    Camera& camera = state.camera;
+    RenderState& state = this->state;
+    {
+        const auto& cameraData = data["Camera"];
+        // state 
+        state.iterations = cameraData["ITERATIONS"];
+        state.traceDepth = cameraData["DEPTH"];
+        state.imageName = cameraData["FILE"];
+        // resolution
+        camera.resolution.x = cameraData["RES"][0];
+        camera.resolution.y = cameraData["RES"][1];
+        // maximum resolution: 15360*8640
+        if (camera.resolution.x * camera.resolution.y > (1 << 27)) {
+            std::cerr << "Maximum Resolution cannot exceed 15360*8640" << '\n';
+        }
+        // position and rotation
+        const auto& pos = cameraData["EYE"];
+        const auto& lookat = cameraData["LOOKAT"];
+        const auto& up = cameraData["UP"];
+        camera.position = glm::vec3(pos[0], pos[1], pos[2]);
+        camera.lookAt = glm::vec3(lookat[0], lookat[1], lookat[2]);
+        camera.up = glm::vec3(up[0], up[1], up[2]);
+        camera.view = glm::normalize(camera.lookAt - camera.position);
+        camera.right = glm::normalize(glm::cross(camera.view, camera.up));
+        // calculate fov based on resolution
+        float fovy = cameraData["FOVY"];
+        float yscaled = tan(fovy * 0.5f * (PI / 180));
+        float xscaled = (yscaled * camera.resolution.x) / camera.resolution.y;
+        float fovx = (atan(xscaled) * 180) / PI;
+        camera.fov = glm::vec2(fovx, fovy);
+        camera.pixelLength = glm::vec2(2 * xscaled / (float)camera.resolution.x,
+            2 * yscaled / (float)camera.resolution.y);
+        // dof related params
+        if (cameraData.contains("FOCALLENGTH")) {
+            camera.focalLength = cameraData["FOCALLENGTH"];
+        }
+        else {
+            camera.focalLength = 1.f;
+        }
+        if (cameraData.contains("LENRADIUS")) {
+            camera.lenRadius = cameraData["LENRADIUS"];
+        }
+        else {
+            camera.lenRadius = 0.f;
+        }
+        camera.autoFocus = true;
+    }
 
     // Matetials
     const auto& materialsData = data["Materials"];
@@ -678,52 +816,6 @@ void Scene::loadFromJSON(const std::string& jsonName)
         std::string fullenvpath = baseDir + envmap_path.get<std::string>();
         envMap.loadToCPU(fullenvpath);
     }
-
-    // Camera ans State settings
-    const auto& cameraData = data["Camera"];
-    Camera& camera = state.camera;
-    RenderState& state = this->state;
-    camera.resolution.x = cameraData["RES"][0];
-    camera.resolution.y = cameraData["RES"][1];
-    // maximum resolution: 15360*8640
-    if (camera.resolution.x * camera.resolution.y > (1 << 27)) {
-        std::cerr << "Maximum Resolution cannot exceed 15360*8640" << '\n';
-    }
-    float fovy = cameraData["FOVY"];
-    state.iterations = cameraData["ITERATIONS"];
-    state.traceDepth = cameraData["DEPTH"];
-    state.imageName = cameraData["FILE"];
-    const auto& pos = cameraData["EYE"];
-    const auto& lookat = cameraData["LOOKAT"];
-    const auto& up = cameraData["UP"];
-    camera.position = glm::vec3(pos[0], pos[1], pos[2]);
-    camera.lookAt = glm::vec3(lookat[0], lookat[1], lookat[2]);
-    camera.up = glm::vec3(up[0], up[1], up[2]);
-    if (cameraData.contains("FOCALLENGTH")) {
-        camera.focalLength = cameraData["FOCALLENGTH"];
-    }
-    else {
-        camera.focalLength = 1.f;
-    }
-    if (cameraData.contains("LENRADIUS")) {
-        camera.lenRadius = cameraData["LENRADIUS"];
-    }
-    else {
-        camera.lenRadius = 0.f;
-    }
-    camera.autoFocus = true;
-
-    //calculate fov based on resolution
-    float yscaled = tan(fovy * 0.5f * (PI / 180));
-    float xscaled = (yscaled * camera.resolution.x) / camera.resolution.y;
-    float fovx = (atan(xscaled) * 180) / PI;
-    camera.fov = glm::vec2(fovx, fovy);
-
-    camera.right = glm::normalize(glm::cross(camera.view, camera.up));
-    camera.pixelLength = glm::vec2(2 * xscaled / (float)camera.resolution.x,
-        2 * yscaled / (float)camera.resolution.y);
-
-    camera.view = glm::normalize(camera.lookAt - camera.position);
 
     //set up render camera stuff
     int arraylen = camera.resolution.x * camera.resolution.y;

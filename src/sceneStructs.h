@@ -113,8 +113,18 @@ struct Material
     int metallicRoughnessTexId;
     int normalmapTexId;
     int emissionmapTexId;
+    int transmissionmapTexId;
 
-    __host__ __device__ Material() : type(DIFFUSE), color(1.f), normalStrength(1.f), baseColorTexId(-1), metallicRoughnessTexId(-1), normalmapTexId(-1), emissionmapTexId(-1) {};
+    __host__ __device__ Material() : 
+        type(DIFFUSE), 
+        color(1.f), 
+        normalStrength(1.f), 
+        baseColorTexId(-1), 
+        metallicRoughnessTexId(-1), 
+        normalmapTexId(-1), 
+        emissionmapTexId(-1), 
+        transmissionmapTexId(-1)
+    {};
 
     __host__ __device__ Material(const Material& other) {
         std::memcpy(this, &other, sizeof(Material));
