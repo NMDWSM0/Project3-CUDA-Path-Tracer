@@ -722,6 +722,7 @@ __host__ __device__ void Sample_f(
     PathSegment& pathSegment,
     glm::vec3 intersect,
     glm::vec3 normal,
+    glm::vec3 geonormal,
     const Material& m,
     thrust::default_random_engine& rng)
 {
@@ -734,6 +735,7 @@ __host__ __device__ void Sample_f(
     else if (m.type == DISNEY) {
         Sample_f_Disney(pathSegment, intersect, normal, m, rng);
     }
+    pathSegment.ray.origin += geonormal * 10.f * EPSILON;
 }
 
 __host__ __device__ glm::vec3 Sample_Li(
@@ -772,11 +774,12 @@ __host__ __device__ void directLight(
     PathSegment& pathSegment,
     glm::vec3 intersect,
     glm::vec3 normal,
+    glm::vec3 geonormal,
     const Material& m,
     thrust::default_random_engine& rng)
 {
     glm::vec3 radiance(0.f);
-    glm::vec3 scatterPos = intersect + normal * EPSILON * 10.f;
+    glm::vec3 scatterPos = intersect + geonormal * EPSILON * 10.f;
 
     if (lightgeoms_size == 0 || m.type == SPECULAR) { // No sample to light for perfectly specular material
         return;
@@ -792,7 +795,7 @@ __host__ __device__ void directLight(
     glm::vec3 lightEmission = Sample_Li(light, scatterPos, lightDir, lightNor, lightDist, pdf_Li, rng);
 
     // check shadow
-    float offset = EPSILON * glm::mix(100.f, 10.f, glm::dot(lightDir, normal));
+    float offset = EPSILON * glm::mix(100.f, 10.f, glm::dot(lightDir, geonormal));
     Ray shadowRay = Ray(scatterPos + lightDir * offset, lightDir - 2 * offset);
     bool inShadow = getAnyHit(shadowRay, curSchannel, bvhNodes, geoms, geoms_size, lightgeoms, lightgeoms_size, vertexPos, vertexSchannel, lightDist - EPSILON);
 
@@ -816,26 +819,30 @@ __device__ void getMatParams(
     Material& mat,
     const ShadeableIntersection& intersect,
     glm::vec3& normal,
-    cudaTextureObject_t* textureHandles)
+    cudaTextureObject_t* textureHandles,
+    float lod)
 {
     // parse textures
-    glm::vec2 uv = intersect.texCoord;
     if (mat.baseColorTexId >= 0) {
-        float4 c = tex2D<float4>(textureHandles[mat.baseColorTexId], uv.x, uv.y);
+        glm::vec2 uv = intersect.texCoord[mat.baseColorTexUV];
+        float4 c = tex2DLod<float4>(textureHandles[mat.baseColorTexId], uv.x, uv.y, lod);
         mat.color = srgbToLinear(glm::vec3(c.x, c.y, c.z));
     }
     if (mat.metallicRoughnessTexId >= 0) {
-        float4 matrgh = tex2D<float4>(textureHandles[mat.metallicRoughnessTexId], uv.x, uv.y);
+        glm::vec2 uv = intersect.texCoord[mat.metallicRoughnessTexUV];
+        float4 matrgh = tex2DLod<float4>(textureHandles[mat.metallicRoughnessTexId], uv.x, uv.y, lod);
         mat.metallic = matrgh.x;
         mat.roughness = glm::max(matrgh.y * matrgh.y, 0.001f);
     }
     if (mat.normalmapTexId >= 0) {
-        float4 c = tex2D<float4>(textureHandles[mat.normalmapTexId], uv.x, uv.y);
+        glm::vec2 uv = intersect.texCoord[mat.normalmapTexUV];
+        float4 c = tex2DLod<float4>(textureHandles[mat.normalmapTexId], uv.x, uv.y, lod);
         glm::vec3 normal_tspace = glm::vec3(c.x, c.y, c.z);
 #if PT_OPENGL_NORMALMAP
         normal_tspace.y = 1.f - normal_tspace.y;
 #endif
         normal_tspace = glm::normalize(normal_tspace * 2.f - 1.f);
+
         normal_tspace.x *= mat.normalStrength;
         normal_tspace.y *= mat.normalStrength;
         normal_tspace = glm::normalize(normal_tspace);
@@ -843,12 +850,14 @@ __device__ void getMatParams(
         normal = glm::normalize(intersect.tangent * normal_tspace.x + bitangent * normal_tspace.y + intersect.surfaceNormal * normal_tspace.z);
     }
     if (mat.emissionmapTexId >= 0) {
-        float4 c = tex2D<float4>(textureHandles[mat.emissionmapTexId], uv.x, uv.y);
+        glm::vec2 uv = intersect.texCoord[mat.emissionmapTexUV];
+        float4 c = tex2DLod<float4>(textureHandles[mat.emissionmapTexId], uv.x, uv.y, lod);
         mat.emission = srgbToLinear(glm::vec3(c.x, c.y, c.z));
         mat.emission *= mat.emissionStrength;
     }
     if (mat.transmissionmapTexId >= 0) {
-        float4 c = tex2D<float4>(textureHandles[mat.transmissionmapTexId], uv.x, uv.y);
+        glm::vec2 uv = intersect.texCoord[mat.transmissionmapTexUV];
+        float4 c = tex2DLod<float4>(textureHandles[mat.transmissionmapTexId], uv.x, uv.y, lod);
         mat.transmission = glm::clamp(c.x, 0.f, 1.f);
     }
 }

@@ -66,7 +66,7 @@ static LightGeom* dev_lightgeoms = nullptr;
 static LinearBVHNode* dev_bvhnodes = nullptr;
 static glm::vec3* dev_vertPos = nullptr;
 static glm::vec3* dev_vertNor = nullptr;
-static glm::vec2* dev_vertUV = nullptr;
+static glm::vec4* dev_vertUV = nullptr;
 static char* dev_vertSchannel = nullptr;
 // mats & textures
 static Material* dev_materials = nullptr;
@@ -147,8 +147,8 @@ void pathtraceInit(Scene* scene)
     cudaMalloc(&dev_vertNor, scene->vertNor.size() * sizeof(glm::vec3));
     cudaMemcpy(dev_vertNor, scene->vertNor.data(), scene->vertNor.size() * sizeof(glm::vec3), cudaMemcpyHostToDevice);
 
-    cudaMalloc(&dev_vertUV, scene->vertUV.size() * sizeof(glm::vec2));
-    cudaMemcpy(dev_vertUV, scene->vertUV.data(), scene->vertUV.size() * sizeof(glm::vec2), cudaMemcpyHostToDevice);
+    cudaMalloc(&dev_vertUV, scene->vertUV.size() * sizeof(glm::vec4));
+    cudaMemcpy(dev_vertUV, scene->vertUV.data(), scene->vertUV.size() * sizeof(glm::vec4), cudaMemcpyHostToDevice);
 
     cudaMalloc(&dev_vertSchannel, scene->vertSchannel.size() * sizeof(char));
     cudaMemcpy(dev_vertSchannel, scene->vertSchannel.data(), scene->vertSchannel.size() * sizeof(char), cudaMemcpyHostToDevice);
@@ -355,6 +355,12 @@ inline __host__ __device__ bool worldToPixel(
         py >= -0.5f && py <= cam.resolution.y - 0.5f);
 }
 
+inline __host__ __device__ float estimateLodByDistance(float distance)
+{
+    constexpr float k = 0.05f;
+    return log2(distance * k);
+}
+
 __global__ void generateGBufferRayFromCamera(Camera cam, PathSegment* pathSegments, glm::vec2 offset)
 {
     int x = (blockIdx.x * blockDim.x) + threadIdx.x;
@@ -501,8 +507,9 @@ __global__ void computeIntersections(
     int lightgeoms_size,
     glm::vec3* vertexPos,
     glm::vec3* vertexNor,
-    glm::vec2* vertexUV,
+    glm::vec4* vertexUV,
     char* vertexSchannel,
+    Material* materials,
     RenderLine* lines,
     char* mattypes,
     ShadeableIntersection* intersections,
@@ -522,6 +529,7 @@ __global__ void computeIntersections(
     glm::vec3* vertexNor,
     glm::vec2* vertexUV,
     char* vertexSchannel,
+    Material* materials,
     RenderLine* lines,
     ShadeableIntersection* intersections)
 #endif // PT_MATERIAL_SORT
@@ -548,7 +556,7 @@ __global__ void computeIntersections(
             hit = false;
         }
         else {
-            hit = getClosestHit(ray, pathSegments[path_index].schannel, depth, bvhNodes, geoms, geoms_size, lightgeoms, lightgeoms_size, vertexPos, vertexNor, vertexUV, vertexSchannel, isect);
+            hit = getClosestHit(ray, pathSegments[path_index].schannel, depth, bvhNodes, geoms, geoms_size, lightgeoms, lightgeoms_size, vertexPos, vertexNor, vertexUV, vertexSchannel, materials, isect);
         }
 
 #if PT_MATERIAL_SORT
@@ -612,8 +620,9 @@ __global__ void computeGBufferIntersections(
     int lightgeoms_size,
     glm::vec3* vertexPos,
     glm::vec3* vertexNor,
-    glm::vec2* vertexUV,
+    glm::vec4* vertexUV,
     char* vertexSchannel,
+    Material* materials,
     ShadeableIntersection* intersections)
 {
     int path_index = blockIdx.x * blockDim.x + threadIdx.x;
@@ -622,7 +631,7 @@ __global__ void computeGBufferIntersections(
     {
         Ray ray = pathSegments[path_index].ray;
         ShadeableIntersection isect;
-        bool hit = getClosestHit(ray, pathSegments[path_index].schannel, 1, bvhNodes, geoms, geoms_size, lightgeoms, lightgeoms_size, vertexPos, vertexNor, vertexUV, vertexSchannel, isect);
+        bool hit = getClosestHit(ray, pathSegments[path_index].schannel, 1, bvhNodes, geoms, geoms_size, lightgeoms, lightgeoms_size, vertexPos, vertexNor, vertexUV, vertexSchannel, materials, isect);
 
         if (!hit)
         {
@@ -868,16 +877,18 @@ __global__ void shadeMaterial(
             else
             {
                 glm::vec3 shadingNormal = intersection.surfaceNormal;
+                glm::vec3 geoNormal = shadingNormal;
                 Material material = materials[intersection.materialId];
-                getMatParams(material, intersection, shadingNormal, textureHandles);
+                float lod = estimateLodByDistance(intersection.t);
+                getMatParams(material, intersection, shadingNormal, textureHandles, lod);
                 glm::vec3 intersectPos = intersection.t * segment.ray.direction + segment.ray.origin;
 
                 // add material emission - not importance sampled 
                 segment.color += segment.throughput * material.emission;         
 #if PT_MIS
-                directLight(intersection.schannel, bvhNodes, geoms, geoms_size, lightgeoms, lightgeoms_size, vertexPos, vertexSchannel, segment, intersectPos, shadingNormal, material, rng);
+                directLight(intersection.schannel, bvhNodes, geoms, geoms_size, lightgeoms, lightgeoms_size, vertexPos, vertexSchannel, segment, intersectPos, shadingNormal, geoNormal, material, rng);
 #endif // PT_MIS
-                Sample_f(segment, intersectPos, shadingNormal, material, rng);
+                Sample_f(segment, intersectPos, shadingNormal, geoNormal, material, rng);
                 segment.schannel = intersection.schannel;
                 segment.remainingBounces--;
 
@@ -997,6 +1008,7 @@ void pathtrace(uchar4* pbo, int maxiter, int iter)
             dev_vertNor,
             dev_vertUV,
             dev_vertSchannel,
+            dev_materials,
             dev_lines,
             dev_mattypes,
             dev_intersections,
@@ -1017,6 +1029,7 @@ void pathtrace(uchar4* pbo, int maxiter, int iter)
             dev_vertNor,
             dev_vertUV,
             dev_vertSchannel,
+            dev_materials,
             dev_lines,
             dev_intersections
             );
@@ -1107,15 +1120,15 @@ void pathtrace(uchar4* pbo, int maxiter, int iter)
     ///////////////////////////////////////////////////////////////////////////
 
     ColorGradingParams postprocess_params{
-        0.0f,     // Exposure(EV)
+        -1.0f,     // Exposure(EV)
         0.0f,     // White-balance:temperature [-1, +1]
         0.0f,     // White-balance:tint [-1, +1]
         1.0f,     // Saturation [0, 2]
-        0.1f,     // Vibrance [0, 1] 
-        1.1f,     // Contrast [0, 2] around pivot
+        0.0f,     // Vibrance [0, 1] 
+        1.05f,     // Contrast [0, 2] around pivot
         0.18f,
         //tone curve
-        false,    // Whether use ACES or Reinhard-L
+        true,    // Whether use ACES or Reinhard-L
         0.0f,     // reinhard-L whitepoint
         // cdl params
         glm::vec3(1.0f),
@@ -1193,6 +1206,7 @@ void pathtraceGetGBuffer()
         dev_vertNor,
         dev_vertUV,
         dev_vertSchannel,
+        dev_materials,
         dev_intersections);
     cudaDeviceSynchronize();
     shadeGBufferMaterial << <numblocksPathSegmentTracing, blockSize1d >> > (
@@ -1231,6 +1245,7 @@ void pathtraceGetGBuffer()
                 dev_vertNor,
                 dev_vertUV,
                 dev_vertSchannel,
+                dev_materials,
                 dev_intersections);
             cudaDeviceSynchronize();
             shadeLineRenderMaterial << <numblocksPathSegmentTracing, blockSize1d >> > (

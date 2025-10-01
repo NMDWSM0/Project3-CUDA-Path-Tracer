@@ -49,6 +49,7 @@ __host__ __device__ void Sample_f(
     PathSegment& pathSegment,
     glm::vec3 intersect,
     glm::vec3 normal,
+    glm::vec3 geonormal,
     const Material& m,
     thrust::default_random_engine& rng);
 
@@ -73,6 +74,7 @@ __host__ __device__ void directLight(
     PathSegment& pathSegment,
     glm::vec3 intersect,
     glm::vec3 normal,
+    glm::vec3 geonormal,
     const Material& m,
     thrust::default_random_engine& rng);
 
@@ -80,4 +82,5 @@ __device__ void getMatParams(
     Material& mat,
     const ShadeableIntersection& intersect,
     glm::vec3& normal,
-    cudaTextureObject_t* textureHandles);
+    cudaTextureObject_t* textureHandles,
+    float lod = 0.f);

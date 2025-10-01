@@ -261,8 +261,9 @@ __host__ __device__ bool getClosestHit(
     int lightgeoms_size,
     glm::vec3* vertexPos,
     glm::vec3* vertexNor,
-    glm::vec2* vertexUV,
+    glm::vec4* vertexUV,
     char* vertexSchannel,
+    Material* materials,
     ShadeableIntersection& intersection) 
 {
     float t = INFINITY;
@@ -479,8 +480,6 @@ __host__ __device__ bool getClosestHit(
 
             intersection.surfaceNormal = glm::normalize(hitPos - center);
             // no texture support
-            intersection.texCoord = glm::vec2(0.f);
-            intersection.tangent = glm::vec3(0.f);
         }
         else {
             // Normals
@@ -489,12 +488,19 @@ __host__ __device__ bool getClosestHit(
             glm::vec3 vn2 = vertexNor[vertIds[2]];
 
             // TexCoords
-            glm::vec2 tc0 = vertexUV[vertIds[0]];
-            glm::vec2 tc1 = vertexUV[vertIds[1]];
-            glm::vec2 tc2 = vertexUV[vertIds[2]];
+            glm::vec4 tc0_01 = vertexUV[vertIds[0]];
+            glm::vec4 tc1_01 = vertexUV[vertIds[1]];
+            glm::vec4 tc2_01 = vertexUV[vertIds[2]];
+            glm::vec2 tc0_0 = glm::vec2(tc0_01.x, tc0_01.y);
+            glm::vec2 tc1_0 = glm::vec2(tc1_01.x, tc1_01.y);
+            glm::vec2 tc2_0 = glm::vec2(tc2_01.x, tc2_01.y);
+            glm::vec2 tc0_1 = glm::vec2(tc0_01.z, tc0_01.w);
+            glm::vec2 tc1_1 = glm::vec2(tc1_01.z, tc1_01.w);
+            glm::vec2 tc2_1 = glm::vec2(tc2_01.z, tc2_01.w);
 
             // Interpolate texture coords and normals using barycentric coords
-            intersection.texCoord = tc0 * barycentricParameters.x + tc1 * barycentricParameters.y + tc2 * barycentricParameters.z;
+            intersection.texCoord[0] = tc0_0 * barycentricParameters.x + tc1_0 * barycentricParameters.y + tc2_0 * barycentricParameters.z;
+            intersection.texCoord[1] = tc0_1 * barycentricParameters.x + tc1_1 * barycentricParameters.y + tc2_1 * barycentricParameters.z;
             // Interpolate normals
             intersection.surfaceNormal = glm::normalize(vn0 * barycentricParameters.x + vn1 * barycentricParameters.y + vn2 * barycentricParameters.z);
 
@@ -502,8 +508,9 @@ __host__ __device__ bool getClosestHit(
             glm::vec3 deltaPos1 = vp1 - vp0;
             glm::vec3 deltaPos2 = vp2 - vp0;
 
-            glm::vec2 deltaUV1 = tc1 - tc0;
-            glm::vec2 deltaUV2 = tc2 - tc0;
+            int normalUVChannel = materials[materialID].normalmapTexUV;
+            glm::vec2 deltaUV1 = normalUVChannel == 1 ? (tc1_1 - tc0_1) : (tc1_0 - tc0_0);
+            glm::vec2 deltaUV2 = normalUVChannel == 1 ? (tc2_1 - tc0_1) : (tc2_0 - tc0_0);
 
             float invdet = 1.0f / (deltaUV1.x * deltaUV2.y - deltaUV1.y * deltaUV2.x);
             glm::vec3 tangent = (deltaPos1 * deltaUV2.y - deltaPos2 * deltaUV1.y) * invdet;

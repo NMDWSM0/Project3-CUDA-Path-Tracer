@@ -112,10 +112,15 @@ struct Material
     float emissionStrength;
     float normalStrength;
     int baseColorTexId;
+    int baseColorTexUV;
     int metallicRoughnessTexId;
+    int metallicRoughnessTexUV;
     int normalmapTexId;
+    int normalmapTexUV;
     int emissionmapTexId;
+    int emissionmapTexUV;
     int transmissionmapTexId;
+    int transmissionmapTexUV;
 
     __host__ __device__ Material() : 
         type(DIFFUSE), 
@@ -157,6 +162,7 @@ struct Texture
     int w = 0, h = 0, c = 0;
     int levels = 0;
     bool isHDR = false;
+    bool isNormal = false;
 
     // for loading from file
     void loadToCPU(const std::string& filename);
@@ -218,13 +224,13 @@ struct ShadeableIntersection
         glm::vec3 lightEmission;
     };
     union {
-        glm::vec2 texCoord;
+        glm::vec2 texCoord[2];
         float pdf_Li;
     };
     glm::vec3 tangent;
     char schannel;
 
-    __host__ __device__ ShadeableIntersection() : t(0), materialId(-1), surfaceNormal(0.f), texCoord(0.f), tangent(0.f), schannel(0) {};
+    __host__ __device__ ShadeableIntersection() : t(0), materialId(-1), surfaceNormal(0.f), texCoord(), tangent(0.f), schannel(0) {};
 
     __host__ __device__ ShadeableIntersection(const ShadeableIntersection& other) {
         std::memcpy(this, &other, sizeof(ShadeableIntersection));

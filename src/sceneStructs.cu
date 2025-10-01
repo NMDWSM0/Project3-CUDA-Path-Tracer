@@ -7,7 +7,7 @@ static inline void CHECK(cudaError_t e, const char* msg) {
     if (e != cudaSuccess) { fprintf(stderr, "%s: %s\n", msg, cudaGetErrorString(e)); std::exit(1); }
 }
 
-__device__ float3 decodeNormalU8(uchar4 c) {
+__forceinline__ __device__ float3 decodeNormalU8(uchar4 c) {
     float3 n = make_float3(
         c.x / 255.0f * 2.0f - 1.0f,
         c.y / 255.0f * 2.0f - 1.0f,
@@ -16,7 +16,7 @@ __device__ float3 decodeNormalU8(uchar4 c) {
     return make_float3(n.x / len, n.y / len, n.z / len);
 }
 
-__device__ uchar4 encodeNormalU8(float3 n) {
+__forceinline__ __device__ uchar4 encodeNormalU8(float3 n) {
     float3 c = make_float3(0.5f * (n.x + 1.f), 0.5f * (n.y + 1.f), 0.5f * (n.z + 1.f));
     return make_uchar4(
         (unsigned char)(fminf(fmaxf(c.x, 0.f), 1.f) * 255.f + 0.5f),
@@ -26,8 +26,24 @@ __device__ uchar4 encodeNormalU8(float3 n) {
     );
 }
 
-__global__ void downsampleNormalKernel(const uchar4* src, int srcW, int srcH,
-    uchar4* dst, int dstW, int dstH)
+__forceinline__ __device__ float3 decodeColorU8(uchar4 uc) {
+    float3 c = make_float3(
+        uc.x / 255.0f,
+        uc.y / 255.0f,
+        uc.z / 255.0f);
+    return c;
+}
+
+__forceinline__ __device__ uchar4 encodeColorU8(float3 c) {
+    return make_uchar4(
+        (unsigned char)(fminf(fmaxf(c.x, 0.f), 1.f) * 255.f + 0.5f),
+        (unsigned char)(fminf(fmaxf(c.y, 0.f), 1.f) * 255.f + 0.5f),
+        (unsigned char)(fminf(fmaxf(c.z, 0.f), 1.f) * 255.f + 0.5f),
+        255
+    );
+}
+
+__global__ void downsampleNormalKernel(const uchar4* src, int srcW, int srcH, uchar4* dst, int dstW, int dstH)
 {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -46,7 +62,8 @@ __global__ void downsampleNormalKernel(const uchar4* src, int srcW, int srcH,
     float3 n01 = decodeNormalU8(c01);
     float3 n11 = decodeNormalU8(c11);
 
-    float3 n = make_float3(n00.x + n10.x + n01.x + n11.x,
+    float3 n = make_float3(
+        n00.x + n10.x + n01.x + n11.x,
         n00.y + n10.y + n01.y + n11.y,
         n00.z + n10.z + n01.z + n11.z);
 
@@ -54,6 +71,33 @@ __global__ void downsampleNormalKernel(const uchar4* src, int srcW, int srcH,
     n.x /= len; n.y /= len; n.z /= len;
 
     dst[y * dstW + x] = encodeNormalU8(n);
+}
+
+__global__ void downsampleColorKernel(const uchar4* src, int srcW, int srcH, uchar4* dst, int dstW, int dstH)
+{
+    int x = blockIdx.x * blockDim.x + threadIdx.x;
+    int y = blockIdx.y * blockDim.y + threadIdx.y;
+    if (x >= dstW || y >= dstH) return;
+
+    int sx = x * 2;
+    int sy = y * 2;
+
+    uchar4 uc00 = src[glm::min(sy, srcH - 1) * srcW + glm::min(sx, srcW - 1)];
+    uchar4 uc10 = src[glm::min(sy, srcH - 1) * srcW + glm::min(sx + 1, srcW - 1)];
+    uchar4 uc01 = src[glm::min(sy + 1, srcH - 1) * srcW + glm::min(sx, srcW - 1)];
+    uchar4 uc11 = src[glm::min(sy + 1, srcH - 1) * srcW + glm::min(sx + 1, srcW - 1)];
+
+    float3 c00 = decodeColorU8(uc00);
+    float3 c10 = decodeColorU8(uc10);
+    float3 c01 = decodeColorU8(uc01);
+    float3 c11 = decodeColorU8(uc11);
+
+    float3 c = make_float3(
+        (c00.x + c10.x + c01.x + c11.x) * .25f,
+        (c00.y + c10.y + c01.y + c11.y) * .25f,
+        (c00.z + c10.z + c01.z + c11.z) * .25f);
+
+    dst[y * dstW + x] = encodeColorU8(c);
 }
 
 int calcMipLevels(int w, int h) {
@@ -148,7 +192,12 @@ cudaTextureObject_t Texture::loadToCuda()
 
                 dim3 block(16, 16);
                 dim3 grid((dstW + 15) / 16, (dstH + 15) / 16);
-                downsampleNormalKernel << <grid, block >> > (dev_src, srcW, srcH, dev_dst, dstW, dstH);
+                if (isNormal) {
+                    downsampleNormalKernel << <grid, block >> > (dev_src, srcW, srcH, dev_dst, dstW, dstH);
+                }
+                else {
+                    downsampleColorKernel << <grid, block >> > (dev_src, srcW, srcH, dev_dst, dstW, dstH);
+                }
                 cudaDeviceSynchronize();
 
                 cudaMemcpyToArray(dstArr, 0, 0, dev_dst, dstW * dstH * sizeof(uchar4), cudaMemcpyDeviceToDevice);

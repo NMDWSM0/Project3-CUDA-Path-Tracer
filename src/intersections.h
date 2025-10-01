@@ -49,8 +49,9 @@ __host__ __device__ bool getClosestHit(
     int lightgeoms_size,
     glm::vec3* vertexPos,
     glm::vec3* vertexNor,
-    glm::vec2* vertexUV,
+    glm::vec4* vertexUV,
     char* vertexSchannel,
+    Material* materials,
     ShadeableIntersection& intersection);
 
 __host__ __device__ bool getAnyHit(

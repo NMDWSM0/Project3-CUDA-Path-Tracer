@@ -24,7 +24,7 @@ using json = nlohmann::json;
 struct GLTFMeshPrim {
     std::vector<glm::vec3> vertices;
     std::vector<glm::vec3> normals;
-    std::vector<glm::vec2> uvs;
+    std::vector<glm::vec4> uvs;
     std::vector<char> schannels;
     std::vector<int> indices;
     int sceneMatIdx;
@@ -144,8 +144,8 @@ static void loadMeshes(Scene* scene, tinygltf::Model& gltfModel)
             int indicesIndex = prim.indices;
             int positionIndex = -1;
             int normalIndex = -1;
-            int tangentIndex = -1;
             int uv0Index = -1;
+            int uv1Index = -1;
             int schannelIndex = -1;
 
             if (prim.attributes.count("POSITION") > 0)
@@ -161,6 +161,11 @@ static void loadMeshes(Scene* scene, tinygltf::Model& gltfModel)
             if (prim.attributes.count("TEXCOORD_0") > 0)
             {
                 uv0Index = prim.attributes["TEXCOORD_0"];
+            }
+
+            if (prim.attributes.count("TEXCOORD_1") > 0)
+            {
+                uv1Index = prim.attributes["TEXCOORD_1"];
             }
 
             if (prim.attributes.count("_SCHANNEL") > 0)
@@ -215,6 +220,20 @@ static void loadMeshes(Scene* scene, tinygltf::Model& gltfModel)
                 if (uv0BufferView.byteStride > 0)
                     uv0Stride = uv0BufferView.byteStride;
             }
+            tinygltf::Accessor uv1Accessor;
+            tinygltf::BufferView uv1BufferView;
+            const uint8_t* uv1BufferAddress = nullptr;
+            int uv1Stride = -1;
+            if (uv1Index > -1)
+            {
+                uv1Accessor = gltfModel.accessors[uv1Index];
+                uv1BufferView = gltfModel.bufferViews[uv1Accessor.bufferView];
+                const tinygltf::Buffer& uv1Buffer = gltfModel.buffers[uv1BufferView.buffer];
+                uv1BufferAddress = uv1Buffer.data.data();
+                uv1Stride = tinygltf::GetComponentSizeInBytes(uv1Accessor.componentType) * tinygltf::GetNumComponentsInType(uv1Accessor.type);
+                if (uv1BufferView.byteStride > 0)
+                    uv1Stride = uv1BufferView.byteStride;
+            }
 
             // Shadow channel
             tinygltf::Accessor schannelAccessor;
@@ -234,14 +253,14 @@ static void loadMeshes(Scene* scene, tinygltf::Model& gltfModel)
 
             std::vector<glm::vec3>& vertices = meshprim.vertices;
             std::vector<glm::vec3>& normals = meshprim.normals;
-            std::vector<glm::vec2>& uvs = meshprim.uvs;
+            std::vector<glm::vec4>& uvs = meshprim.uvs;
             std::vector<char>& schannels = meshprim.schannels;
 
             // Get vertex data
             for (size_t vertexIndex = 0; vertexIndex < positionAccessor.count; vertexIndex++)
             {
                 glm::vec3 vertex, normal, tangent;
-                glm::vec2 uv;
+                glm::vec2 uv0, uv1;
                 float schannel = 0;
 
                 {
@@ -258,7 +277,12 @@ static void loadMeshes(Scene* scene, tinygltf::Model& gltfModel)
                 if (uv0Index > -1)
                 {
                     const uint8_t* address = uv0BufferAddress + uv0BufferView.byteOffset + uv0Accessor.byteOffset + (vertexIndex * uv0Stride);
-                    memcpy(&uv, address, sizeof(glm::vec2));
+                    memcpy(&uv0, address, sizeof(glm::vec2));
+                }
+                if (uv1Index > -1)
+                {
+                    const uint8_t* address = uv1BufferAddress + uv1BufferView.byteOffset + uv1Accessor.byteOffset + (vertexIndex * uv1Stride);
+                    memcpy(&uv1, address, sizeof(glm::vec2));
                 }
 
                 if (schannelIndex > -1)
@@ -269,7 +293,7 @@ static void loadMeshes(Scene* scene, tinygltf::Model& gltfModel)
 
                 vertices.push_back(vertex);
                 normals.push_back(normal);
-                uvs.push_back(uv);
+                uvs.push_back(glm::vec4(uv0, uv1));
                 schannels.push_back(static_cast<char>((int)schannel));
             }
 
@@ -375,19 +399,20 @@ static bool customLoadImageData(tinygltf::Image* image, int image_idx, std::stri
     return true;
 }
 
-void loadTextures(Scene* scene, tinygltf::Model& gltfModel)
+void loadTextures(Scene* scene, tinygltf::Model& gltfModel, const std::vector<bool>& isNormal)
 {
     for (size_t i = 0; i < gltfModel.textures.size(); ++i)
     {
         tinygltf::Texture& gltfTex = gltfModel.textures[i];
         tinygltf::Image& image = gltfModel.images[gltfTex.source];
         Texture texture;
+        texture.isNormal = isNormal[i];
         texture.loadToCPU(image.image.data(), image.width, image.height, image.component);
         scene->textures.push_back(texture);
     }
 }
 
-void loadMaterials(Scene* scene, tinygltf::Model& gltfModel)
+void loadMaterials(Scene* scene, tinygltf::Model& gltfModel, std::vector<bool>& isNormal)
 {
     int sceneTexIdx = scene->textures.size();
     for (size_t i = 0; i < gltfModel.materials.size(); i++)
@@ -402,24 +427,37 @@ void loadMaterials(Scene* scene, tinygltf::Model& gltfModel)
         // Albedo
         material.color = glm::vec3((float)pbr.baseColorFactor[0], (float)pbr.baseColorFactor[1], (float)pbr.baseColorFactor[2]);
         if (pbr.baseColorTexture.index > -1)
+        {
             material.baseColorTexId = pbr.baseColorTexture.index + sceneTexIdx;
+            material.baseColorTexUV = pbr.baseColorTexture.texCoord;
+        }
 
         // Emission
         material.emission = glm::vec3((float)gltfMaterial.emissiveFactor[0], (float)gltfMaterial.emissiveFactor[1], (float)gltfMaterial.emissiveFactor[2]);
         if (gltfMaterial.emissiveTexture.index > -1)
+        {
             material.emissionmapTexId = gltfMaterial.emissiveTexture.index + sceneTexIdx;
+            material.emissionmapTexUV = gltfMaterial.emissiveTexture.texCoord;
+        }
+            
 
         // Roughness and Metallic
         material.roughness = (float)pbr.roughnessFactor;
         material.roughness = glm::clamp(material.roughness * material.roughness, 0.001f, 1.f);
         material.metallic = (float)pbr.metallicFactor;
-        if (pbr.metallicRoughnessTexture.index > -1)
+        if (pbr.metallicRoughnessTexture.index > -1) 
+        {
             material.metallicRoughnessTexId = pbr.metallicRoughnessTexture.index + sceneTexIdx;
+            material.metallicRoughnessTexUV = pbr.metallicRoughnessTexture.texCoord;
+        }
+            
 
         // Normal Map
-        material.normalmapTexId = gltfMaterial.normalTexture.index + sceneTexIdx;
-        if (gltfMaterial.normalTexture.scale >= 0) {
+        if (gltfMaterial.normalTexture.index >= 0 && gltfMaterial.normalTexture.scale >= 0) {
+            material.normalmapTexId = gltfMaterial.normalTexture.index + sceneTexIdx;
+            material.normalmapTexUV = gltfMaterial.normalTexture.texCoord;
             material.normalStrength = gltfMaterial.normalTexture.scale;
+            isNormal[gltfMaterial.normalTexture.index] = true;
         }
 
         // KHR_materials_transmission
@@ -429,8 +467,10 @@ void loadMaterials(Scene* scene, tinygltf::Model& gltfModel)
             const auto& ext = gltfMaterial.extensions.at("KHR_materials_transmission");
             if (ext.Has("transmissionFactor"))
                 material.transmission = (float)(ext.Get("transmissionFactor").Get<double>());
-            if (ext.Has("transmissionTexture"))
+            if (ext.Has("transmissionTexture")) {
                 material.transmissionmapTexId = ext.Get("transmissionTexture").Get("index").Get<int>() + sceneTexIdx;
+                material.transmissionmapTexUV = ext.Get("transmissionTexture").Get("texCoord").Get<int>();
+            }
         }
 
         // KHR_materials_ior
@@ -617,8 +657,12 @@ void Scene::loadFromGLTF(const std::string& fileName, const glm::mat4& inputTran
     MeshPrims.clear(); // clear meshes, prevent reading previous mesh idx from other gltf files
     loadMeshes(this, model);
     loadMeshInstances(this, meshinstances);
-    loadMaterials(this, model);
-    loadTextures(this, model);
+
+    std::vector<bool> isNormal;
+    isNormal.resize(model.textures.size());
+    loadMaterials(this, model, isNormal);
+    loadTextures(this, model, isNormal);
+
     if (loadCam) {
         loadCamera(this, model, camerainstances);
     }
@@ -843,7 +887,7 @@ void Scene::loadFromJSON(const std::string& jsonName)
                 for (int j = 0; j < 3; ++j) {
                     vertPos.push_back(posarray[boxTriangles[i][j]]);
                     vertNor.push_back(boxNormals[i]);
-                    vertUV.push_back(faceUVs[(i & 1) + j]);
+                    vertUV.push_back(glm::vec4(faceUVs[(i & 1) + j], faceUVs[(i & 1) + j]));
                     vertSchannel.push_back(static_cast<char>(schannel));
                 }
 
