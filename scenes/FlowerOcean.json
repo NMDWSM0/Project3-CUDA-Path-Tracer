@@ -15,19 +15,13 @@
     "EnvMap": {
         "PATH": "./FlowerOcean.hdr"
     },
-    "Lights": [
-        {
-            "TYPE": "directional",
-            "EMISSION": [4.0, 4.0, 4.0],
-            "POSITION": [0, -1, -2.5],
-            "ALPHA": 6.0
-        }
-    ],
+    "Lights": [],
     "Objects": [
         {
-            "TYPE": "mesh",
+            "TYPE": "gltf",
             "PATH": "./Flower_Castorice.glb",
-            "OVERRIDE_CAMERA": true
+            "OVERRIDE_CAMERA": true,
+            "LOAD_LIGHT": true
         }
     ]
 }

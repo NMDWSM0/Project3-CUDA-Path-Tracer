@@ -587,7 +587,7 @@ __host__ __device__ void Sample_f_Disney(
 
 
 
-__host__ __device__ void Sample_Li_Sphere(
+__host__ __device__ glm::vec3 Sample_Li_Sphere(
     const LightGeom& light, 
     glm::vec3 scatterPos, 
     glm::vec3& lightDir, 
@@ -610,9 +610,10 @@ __host__ __device__ void Sample_Li_Sphere(
     lightDir = direction / lightDist;
     lightNor = normalize(lightSurfacePos - position);
     pdf = distSq / ((PI * radius * radius) * 0.5 * abs(glm::dot(lightNor, lightDir)));
+    return light.emission;
 }
 
-__host__ __device__ void Sample_Li_Rect(
+__host__ __device__ glm::vec3 Sample_Li_Rect(
     const LightGeom& light,
     glm::vec3 scatterPos,
     glm::vec3& lightDir,
@@ -632,9 +633,10 @@ __host__ __device__ void Sample_Li_Rect(
     glm::vec3 uvcross = glm::cross(light.u, light.v);
     lightNor = glm::normalize(uvcross);
     pdf = distSq / (glm::length(uvcross) * abs(glm::dot(lightNor, lightDir)));
+    return light.emission;
 }
 
-__host__ __device__ void Sample_Li_Directional (
+__host__ __device__ glm::vec3 Sample_Li_Directional (
     const LightGeom& light,
     glm::vec3 scatterPos,
     glm::vec3& lightDir,
@@ -651,8 +653,38 @@ __host__ __device__ void Sample_Li_Directional (
     lightNor = lightDir;
     lightDist = INFINITY;
     pdf = 1.0;
+    return light.emission;
 }
 
+__host__ __device__ glm::vec3 Sample_Li_Spot(
+    const LightGeom& light,
+    glm::vec3 scatterPos,
+    glm::vec3& lightDir,
+    glm::vec3& lightNor,
+    float& lightDist,
+    float& pdf,
+    thrust::default_random_engine& rng)
+{
+    glm::vec3 position = light.position;
+    glm::vec3 sphereCentertoSurface = normalize(scatterPos - position);
+    glm::vec3 sampledDir = uniformSampleHemisphere(sphereCentertoSurface, rng);
+
+    float radius = light.radius;
+    glm::vec3 lightSurfacePos = position + sampledDir * radius;
+
+    glm::vec3 direction = lightSurfacePos - scatterPos;
+    lightDist = glm::length(direction);
+    float distSq = lightDist * lightDist;
+
+    lightDir = direction / lightDist;
+    lightNor = normalize(lightSurfacePos - position);
+    pdf = distSq / ((PI * radius * radius) * 0.5 * abs(glm::dot(lightNor, lightDir)));
+
+    float angle = glm::acos(glm::dot(-lightDir, light.u));
+    float falloff = glm::smoothstep(light.outerAngle, light.innerAngle, angle);
+
+    return light.emission * falloff;
+}
 
 
 
@@ -704,7 +736,7 @@ __host__ __device__ void Sample_f(
     }
 }
 
-__host__ __device__ void Sample_Li(
+__host__ __device__ glm::vec3 Sample_Li(
     const LightGeom& light,
     glm::vec3 scatterPos,
     glm::vec3& lightDir,
@@ -714,11 +746,13 @@ __host__ __device__ void Sample_Li(
     thrust::default_random_engine& rng)
 {
     if (light.type == SPHERELIGHT)
-        Sample_Li_Sphere(light, scatterPos, lightDir, lightNor, lightDist, pdf, rng);
+        return Sample_Li_Sphere(light, scatterPos, lightDir, lightNor, lightDist, pdf, rng);
+    if (light.type == SPOTLIGHT)
+        return Sample_Li_Spot(light, scatterPos, lightDir, lightNor, lightDist, pdf, rng);
     else if (light.type == RECTLIGHT)
-        Sample_Li_Rect(light, scatterPos, lightDir, lightNor, lightDist, pdf, rng);
+        return Sample_Li_Rect(light, scatterPos, lightDir, lightNor, lightDist, pdf, rng);
     else if (light.type == DIRECTIONALLIGHT)
-        Sample_Li_Directional(light, scatterPos, lightDir, lightNor, lightDist, pdf, rng);
+        return Sample_Li_Directional(light, scatterPos, lightDir, lightNor, lightDist, pdf, rng);
 }
 
 
@@ -755,7 +789,7 @@ __host__ __device__ void directLight(
     glm::vec3 lightDir, lightNor;
     float lightDist, pdf_Li;
     LightGeom& light = lightgeoms[index];
-    Sample_Li(light, scatterPos, lightDir, lightNor, lightDist, pdf_Li, rng);
+    glm::vec3 lightEmission = Sample_Li(light, scatterPos, lightDir, lightNor, lightDist, pdf_Li, rng);
 
     // check shadow
     float offset = EPSILON * glm::mix(100.f, 10.f, glm::dot(lightDir, normal));
@@ -771,7 +805,7 @@ __host__ __device__ void directLight(
             misWeight = powerHeuristic(pdf_Li, pdf_bsdf);
 
         if (pdf_bsdf > 0.0)
-            radiance += misWeight * (light.emission * float(lightgeoms_size)) * bsdf / pdf_Li * pathSegment.throughput;
+            radiance += misWeight * (lightEmission * float(lightgeoms_size)) * bsdf / pdf_Li * pathSegment.throughput;
     }
 
     pathSegment.color += radiance;

@@ -52,7 +52,7 @@ __host__ __device__ void Sample_f(
     const Material& m,
     thrust::default_random_engine& rng);
 
-__host__ __device__ void Sample_Li(
+__host__ __device__ glm::vec3 Sample_Li(
     const LightGeom& light,
     glm::vec3 scatterPos,
     glm::vec3& lightDir,

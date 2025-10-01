@@ -10,6 +10,9 @@
 // russian roulette
 #define PT_RUSSIAN_ROULETTE 1
 
+// hide emitters (lightmesh itself)
+#define PT_HIDE_EMITTERS 0
+
 // multiple importance sampling
 #define PT_MIS 1
 

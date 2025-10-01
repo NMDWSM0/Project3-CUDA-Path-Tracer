@@ -128,11 +128,17 @@ __host__ __device__ bool getAnyHit(
             }
         }
         // sphere light
-        if (type == SPHERELIGHT) {
+        if (type == SPHERELIGHT || type == SPOTLIGHT) {
             glm::vec3 position = light.position;
-            float& radius = u.x;
+            float radius = light.radius;
             float distance = SphereIntersect(radius, position, r);
-            if (distance > 0 && distance < maxt) {
+            bool inAngle = true;
+            if (type == SPOTLIGHT) {
+                float angle = glm::acos(glm::dot(-r.direction, light.u));
+                if (angle > light.outerAngle)
+                    inAngle = false;
+            }
+            if (distance > 0 && distance < maxt && inAngle) {
                 return true;
             }
         }
@@ -247,6 +253,7 @@ __host__ __device__ bool getAnyHit(
 __host__ __device__ bool getClosestHit(
     const Ray& r,
     char curSchannel,
+    int depth, 
     LinearBVHNode* bvhNodes,
     Geom* geoms,
     int geoms_size,
@@ -261,6 +268,9 @@ __host__ __device__ bool getClosestHit(
     float t = INFINITY;
 
     // first check light source
+#if PT_HIDE_EMITTERS
+    if (depth > 0)
+#endif // PT_HIDE_EMITTERS
     for (int i = 0; i < lightgeoms_size; ++i) {
         LightGeom& light = lightgeoms[i];
         LightType type = light.type;
@@ -287,16 +297,24 @@ __host__ __device__ bool getClosestHit(
             }
         }
         // sphere light
-        if (type == SPHERELIGHT) {
+        if (type == SPHERELIGHT || type == SPOTLIGHT) {
             glm::vec3 position = light.position;
-            float& radius = u.x;
+            float radius = light.radius;
             float distance = SphereIntersect(radius, position, r);
-            if (distance < t) {
+            bool inAngle = true;
+            float falloff = 1.f;
+            if (type == SPOTLIGHT) {
+                float angle = glm::acos(glm::dot(-r.direction, light.u));
+                if (angle > light.outerAngle)
+                    inAngle = false;
+                falloff = glm::smoothstep(light.outerAngle, light.innerAngle, angle);
+            }
+            if (distance < t && inAngle) {
                 t = distance;
                 glm::vec3 hitPoint = r.origin + t * r.direction;
                 float cosTheta = glm::dot(-r.direction, glm::normalize(hitPoint - position));
                 intersection.pdf_Li = (t * t) / (PI * radius * radius * cosTheta * 0.5);
-                intersection.lightEmission = light.emission;
+                intersection.lightEmission = light.emission * falloff;
                 intersection.materialId = -1;
             }
         }

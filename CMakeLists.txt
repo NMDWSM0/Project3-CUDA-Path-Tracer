@@ -78,7 +78,7 @@ set(sources
     src/scene.cpp
     src/utilities.cpp
     src/bsdf.cu
-    src/sceneStructs.cpp
+    src/sceneStructs.cu
     src/bvh.cpp
 )
 

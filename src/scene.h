@@ -8,7 +8,7 @@ class Scene
 {
 private:
     void loadFromJSON(const std::string& jsonName);
-    void loadFromGLTF(const std::string& fileName, const glm::mat4& inputTransform = glm::mat4(1.f));
+    void loadFromGLTF(const std::string& fileName, const glm::mat4& inputTransform, bool loadCam, bool loadLgt);
 public:
     Scene(std::string filename);
 

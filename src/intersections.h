@@ -41,6 +41,7 @@ __host__ __device__ inline glm::vec3 multiplyMV(glm::mat4 m, glm::vec4 v)
 __host__ __device__ bool getClosestHit(
     const Ray& r,
     char curSchannel,
+    int depth,
     LinearBVHNode* bvhNodes,
     Geom* geoms,
     int geoms_size,

@@ -548,7 +548,7 @@ __global__ void computeIntersections(
             hit = false;
         }
         else {
-            hit = getClosestHit(ray, pathSegments[path_index].schannel, bvhNodes, geoms, geoms_size, lightgeoms, lightgeoms_size, vertexPos, vertexNor, vertexUV, vertexSchannel, isect);
+            hit = getClosestHit(ray, pathSegments[path_index].schannel, depth, bvhNodes, geoms, geoms_size, lightgeoms, lightgeoms_size, vertexPos, vertexNor, vertexUV, vertexSchannel, isect);
         }
 
 #if PT_MATERIAL_SORT
@@ -622,7 +622,7 @@ __global__ void computeGBufferIntersections(
     {
         Ray ray = pathSegments[path_index].ray;
         ShadeableIntersection isect;
-        bool hit = getClosestHit(ray, pathSegments[path_index].schannel, bvhNodes, geoms, geoms_size, lightgeoms, lightgeoms_size, vertexPos, vertexNor, vertexUV, vertexSchannel, isect);
+        bool hit = getClosestHit(ray, pathSegments[path_index].schannel, 1, bvhNodes, geoms, geoms_size, lightgeoms, lightgeoms_size, vertexPos, vertexNor, vertexUV, vertexSchannel, isect);
 
         if (!hit)
         {

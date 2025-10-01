@@ -19,7 +19,8 @@ enum LightType
 {
     SPHERELIGHT,
     RECTLIGHT,
-    DIRECTIONALLIGHT
+    DIRECTIONALLIGHT,
+    SPOTLIGHT
 };
 
 // only for 4bit, stored in last 4 bit while sorting
@@ -90,6 +91,7 @@ struct LightGeom
     glm::vec3 u;
     glm::vec3 v;
     float radius;
+    float innerAngle, outerAngle;
 
     __host__ __device__ LightGeom(LightType type) : type(type) {}
 };
@@ -149,10 +151,11 @@ struct RenderLine
 struct Texture 
 {
     cudaTextureObject_t handle = 0;
-    cudaArray_t         array = nullptr;
+    cudaMipmappedArray_t array = nullptr;
     std::vector<unsigned char> cpudata;
     std::vector<float> cpudataHDR;
     int w = 0, h = 0, c = 0;
+    int levels = 0;
     bool isHDR = false;
 
     // for loading from file

@@ -61,6 +61,12 @@ static struct CameraInstance {
     glm::mat4 world{ 1.0f };
 };
 
+static struct LightInstance {
+    int node = -1;
+    int light = -1;
+    glm::mat4 world{ 1.0f };
+};
+
 static inline glm::mat4 LocalOf(const tinygltf::Node& n) {
     if (n.matrix.size() == 16) {
         return glm::make_mat4(reinterpret_cast<const float*>(n.matrix.data()));
@@ -76,24 +82,45 @@ static inline glm::mat4 LocalOf(const tinygltf::Node& n) {
     return glm::translate(glm::mat4(1.0f), T) * glm::mat4_cast(R) * glm::scale(glm::mat4(1.0f), S); // T*R*S
 }
 
-static void DFS(const tinygltf::Model& m, int ni, const glm::mat4& parent, std::vector<MeshInstance>& out, std::vector<CameraInstance>& outcams) {
+static void DFS(
+    const tinygltf::Model& m, 
+    int ni, 
+    const glm::mat4& parent, 
+    std::vector<MeshInstance>& out, 
+    std::vector<CameraInstance>& outcams,
+    std::vector<LightInstance>& outlights)
+{
     const auto& n = m.nodes[ni];
     glm::mat4 world = parent * LocalOf(n);
     if (n.mesh >= 0)
+    {
         out.push_back({ ni, n.mesh, world });
+    }
     else if (n.camera >= 0)
-        outcams.push_back({ni, n.camera, world});
+    {
+        outcams.push_back({ ni, n.camera, world });
+    }   
+    else if (n.extensions.find("KHR_lights_punctual") != n.extensions.end()) {
+        const auto& ext = n.extensions.at("KHR_lights_punctual");
+        outlights.push_back({ ni, ext.Get("light").Get<int>(), world });
+    }
+        
     for (int c : n.children) 
-        DFS(m, c, world, out, outcams);
+        DFS(m, c, world, out, outcams, outlights);
 }
 
-static void CollectInstancesOneScene(const tinygltf::Model& model, std::vector<MeshInstance>& out, std::vector<CameraInstance>& outcams) {
+static void CollectInstancesOneScene(
+    const tinygltf::Model& model, 
+    const glm::mat4& inputTransform,
+    std::vector<MeshInstance>& out, 
+    std::vector<CameraInstance>& outcams, 
+    std::vector<LightInstance>& outlights)
+{
     const int s = (model.defaultScene >= 0) ? model.defaultScene : 0;
     for (int root : model.scenes[s].nodes) 
-        DFS(model, root, glm::mat4(1.0f), out, outcams);
+        DFS(model, root, inputTransform, out, outcams, outlights);
 }
 
-//static void loadMeshes(Scene* scene, tinygltf::Model& gltfModel, const glm::mat4& inputTransform)
 static void loadMeshes(Scene* scene, tinygltf::Model& gltfModel)
 {
     //glm::mat3 normalTransform = glm::inverseTranspose(glm::mat3(inputTransform));
@@ -117,6 +144,7 @@ static void loadMeshes(Scene* scene, tinygltf::Model& gltfModel)
             int indicesIndex = prim.indices;
             int positionIndex = -1;
             int normalIndex = -1;
+            int tangentIndex = -1;
             int uv0Index = -1;
             int schannelIndex = -1;
 
@@ -212,7 +240,7 @@ static void loadMeshes(Scene* scene, tinygltf::Model& gltfModel)
             // Get vertex data
             for (size_t vertexIndex = 0; vertexIndex < positionAccessor.count; vertexIndex++)
             {
-                glm::vec3 vertex, normal;
+                glm::vec3 vertex, normal, tangent;
                 glm::vec2 uv;
                 float schannel = 0;
 
@@ -287,9 +315,9 @@ static void loadMeshes(Scene* scene, tinygltf::Model& gltfModel)
     }
 }
 
-static void loadMeshInstances(Scene* scene, const std::vector<MeshInstance>& instances, const glm::mat4& inputTransform) {
+static void loadMeshInstances(Scene* scene, const std::vector<MeshInstance>& instances) {
     for (auto& instance : instances) {
-        glm::mat4 positionTransform = inputTransform * instance.world;
+        glm::mat4 positionTransform = instance.world;
         glm::mat3 normalTransform = glm::inverseTranspose(glm::mat3(positionTransform));
 
         // instance the mesh to scene
@@ -497,7 +525,68 @@ void loadCamera(Scene* scene, tinygltf::Model& gltfModel, const std::vector<Came
     }
 }
 
-void Scene::loadFromGLTF(const std::string& fileName, const glm::mat4& inputTransform)
+void loadLights(Scene* scene, tinygltf::Model& gltfModel, const std::vector<LightInstance>& lightinstances) {
+    for (int i = 0; i < lightinstances.size(); ++i)
+    {
+        const auto& lightinstance = lightinstances[i];
+        const auto& _light = gltfModel.lights[lightinstance.light];  // load the first camera
+        if (_light.type == "point") {
+            // add a sphere light to scene
+            //LightGeom newLight(SPHERELIGHT);
+            //glm::vec3 emission = glm::vec3(_light.color[0], _light.color[1], _light.color[2]) * (float)_light.intensity;
+            //glm::vec3 position = glm::vec3(lightinstance.world[3]);
+            //glm::vec3 dir = glm::normalize(glm::mat3(lightinstance.world) * glm::vec3(0, 0, -1));
+            //newLight.emission = emission;
+            //newLight.position = position;
+            //if (_light.extras.Has("radius")) {
+            //    newLight.radius = fmax(_light.extras.Get("radius").Get<double>(), 0.01f);
+            //}
+            //else {
+            //    newLight.radius = 4.0f;
+            //}
+            //newLight.emission /= 4 * PI * PI * newLight.radius * newLight.radius;
+            //scene->lightgeoms.push_back(newLight);
+        }
+        else if (_light.type == "spot") {
+            // add a spot light to scene
+            LightGeom newLight(SPOTLIGHT);
+            glm::vec3 emission = glm::vec3(_light.color[0], _light.color[1], _light.color[2]) * (float)_light.intensity;
+            glm::vec3 position = glm::vec3(lightinstance.world[3]);
+            glm::vec3 dir = glm::normalize(glm::mat3(lightinstance.world) * glm::vec3(0, 0, -1));
+            newLight.emission = emission;
+            newLight.position = position;
+            newLight.u = dir;
+            newLight.innerAngle = _light.spot.innerConeAngle;  // already in radians
+            newLight.outerAngle = _light.spot.outerConeAngle;
+            if (_light.extras.Has("radius")) {
+                newLight.radius = fmax(_light.extras.Get("radius").Get<double>(), 0.01f);
+            }
+            else {
+                newLight.radius = 4.0f;
+            }
+            newLight.emission /= 4 * PI * PI * newLight.radius * newLight.radius;
+            scene->lightgeoms.push_back(newLight);
+        }
+        else if (_light.type == "directional") {
+            // add a directional light to scene
+            LightGeom newLight(DIRECTIONALLIGHT);
+            glm::vec3 emission = glm::vec3(_light.color[0], _light.color[1], _light.color[2]) * (float)_light.intensity;
+            /*glm::vec3 position = glm::vec3(lightinstance.world[3]);*/
+            glm::vec3 dir = glm::normalize(glm::mat3(lightinstance.world) * glm::vec3(0, 0, -1));
+            newLight.emission = emission;
+            newLight.position = dir;
+            if (_light.extras.Has("alpha")) {
+                newLight.radius = _light.extras.Get("alpha").Get<double>() * PI / 180;
+            }
+            else {
+                newLight.radius = 0.265f * PI / 180;
+            }
+            scene->lightgeoms.push_back(newLight);
+        }
+    }
+}
+
+void Scene::loadFromGLTF(const std::string& fileName, const glm::mat4& inputTransform, bool loadCam, bool loadLgt)
 {
     std::string ext = fileName.substr(fileName.find_last_of(".") + 1);
 
@@ -521,15 +610,21 @@ void Scene::loadFromGLTF(const std::string& fileName, const glm::mat4& inputTran
 
     std::vector<MeshInstance> meshinstances;
     std::vector<CameraInstance> camerainstances;
-    CollectInstancesOneScene(model, meshinstances, camerainstances);
-    assert(meshinstances.size() > 0, "should have at least 1 instance in the scene");
+    std::vector<LightInstance> lightinstances;
+    CollectInstancesOneScene(model, inputTransform, meshinstances, camerainstances, lightinstances);
+    assert(meshinstances.size() > 0, "should have at least 1 mesh instance in the scene");
 
     MeshPrims.clear(); // clear meshes, prevent reading previous mesh idx from other gltf files
     loadMeshes(this, model);
-    loadMeshInstances(this, meshinstances, inputTransform);
+    loadMeshInstances(this, meshinstances);
     loadMaterials(this, model);
     loadTextures(this, model);
-    loadCamera(this, model, camerainstances);
+    if (loadCam) {
+        loadCamera(this, model, camerainstances);
+    }
+    if (loadLgt) {
+        loadLights(this, model, lightinstances);
+    }
 }
 
 void Scene::loadFromJSON(const std::string& jsonName)
@@ -771,7 +866,7 @@ void Scene::loadFromJSON(const std::string& jsonName)
 
             geoms.push_back(newGeom);
         }
-        else if (type == "mesh")
+        else if (type == "gltf")
         {
             const auto& mesh_path = p["PATH"];
             std::string fullmeshpath = baseDir + mesh_path.get<std::string>();
@@ -791,8 +886,9 @@ void Scene::loadFromJSON(const std::string& jsonName)
             }
             
             glm::mat4 transform = utilityCore::buildTransformationMatrix(translation, rotation, scalevec);
-
-            loadFromGLTF(fullmeshpath, transform);
+            bool loadCam = p.value("OVERRIDE_CAMERA", false);
+            bool loadLgt = p.value("LOAD_LIGHT", false);
+            loadFromGLTF(fullmeshpath, transform, loadCam, loadLgt);
         }
     }
 
