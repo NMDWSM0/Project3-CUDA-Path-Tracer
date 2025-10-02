@@ -23,4 +23,5 @@ public:
     Texture envMap;
     RenderState state;
     std::shared_ptr<BVHAccel> bvhAccel;
+    std::shared_ptr<BVHAccel> extend_bvhAccel;
 };

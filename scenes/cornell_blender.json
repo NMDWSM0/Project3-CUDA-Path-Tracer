@@ -2,17 +2,19 @@
     "Camera": {
         "RES": [1080, 1080],
         "FOVY": 60.0,
-        "ITERATIONS": 4096,
+        "ITERATIONS": 24,
         "DEPTH": 10,
         "FILE": "Cornell_Blender",
         "EYE": [0.0, 5.0, 17.0],
         "LOOKAT": [0.0, 5.0, 0.0],
-        "UP": [0.0, 1.0, 0.0]
+        "UP": [0.0, 1.0, 0.0],
+        "FOCALLENGTH": 16.8,
+        "LENRADIUS": 0.0
     },
     "Objects": [
         {
             "TYPE": "gltf",
-            "PATH": "./Cornell_Blender.glb",
+            "PATH": "./cornell_blender.glb",
             "OVERRIDE_CAMERA": true,
             "LOAD_LIGHT": true
         }

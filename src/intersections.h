@@ -38,6 +38,12 @@ __host__ __device__ inline glm::vec3 multiplyMV(glm::mat4 m, glm::vec4 v)
     return glm::vec3(m * v);
 }
 
+enum PTCullingOptions {
+    CULLNONE,
+    CULLFRONT,
+    CULLBACK
+};
+
 __host__ __device__ bool getClosestHit(
     const Ray& r,
     char curSchannel,
@@ -52,7 +58,9 @@ __host__ __device__ bool getClosestHit(
     glm::vec4* vertexUV,
     char* vertexSchannel,
     Material* materials,
-    ShadeableIntersection& intersection);
+    ShadeableIntersection& intersection,
+    float normalOffset = 0.f,
+    PTCullingOptions culling = PTCullingOptions::CULLNONE);
 
 __host__ __device__ bool getAnyHit(
     const Ray& r,

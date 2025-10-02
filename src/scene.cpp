@@ -1,4 +1,5 @@
 #include "scene.h"
+#include "defines.h"
 #define TINYGLTF_IMPLEMENTATION
 
 #include "utilities.h"
@@ -508,7 +509,11 @@ void loadMaterials(Scene* scene, tinygltf::Model& gltfModel, std::vector<bool>& 
         }
 
         // line color
-        material.linecolor = glm::vec3(0.f);
+        // -2.0 : do not cast lines, but can other objects can draw lines on (default)
+        // -1.0 : do not cast lines, and other objects cannot draw lines on (completely disable)
+        // 0.0 : draw lines, and use object color mix with black for line color
+        // 0 - 1 : draw lines, and use the input RGB color
+        material.linecolor = glm::vec3(-2.f);
         if (gltfMaterial.extras.Has("my_linecolor")) {
             float r = gltfMaterial.extras.Get("my_linecolor").Get(0).GetNumberAsDouble();
             float g = gltfMaterial.extras.Get("my_linecolor").Get(1).GetNumberAsDouble();
@@ -946,7 +951,27 @@ void Scene::loadFromJSON(const std::string& jsonName)
         }
     }
     bvhAccel = CreateBVHAccelerator(primitives, 1);
-
+#if PT_LINE_RENDER
+    std::vector<std::shared_ptr<Primitive>> extend_primitives;
+    for (int i = 0; i < geoms.size(); ++i) {
+        const Geom& geom = geoms[i];
+        // only put line rendering stuff into extend BVH
+        if (geom.materialid >= 0 && materials[geom.materialid].linecolor.x >= 0.f) {
+            if (geom.type == SPHERE) {
+                primitives.push_back(std::make_shared<Primitive>(i, geom.center, geom.radius + PT_LINE_MAXWIDTH));
+            }
+            else {
+                Bounds3f oriBound(vertPos[geom.vertIds[0]], vertPos[geom.vertIds[1]]);
+                oriBound = Union(oriBound, vertPos[geom.vertIds[2]]);
+                Bounds3f extendBound(vertPos[geom.vertIds[0]] + (float)PT_LINE_MAXWIDTH * vertNor[geom.vertIds[0]],
+                    vertPos[geom.vertIds[1]] + (float)PT_LINE_MAXWIDTH * vertNor[geom.vertIds[1]]);
+                extendBound = Union(extendBound, vertPos[geom.vertIds[2]] + (float)PT_LINE_MAXWIDTH * vertNor[geom.vertIds[2]]);
+                primitives.push_back(std::make_shared<Primitive>(i, Union(oriBound, extendBound)));
+            }
+        }
+    }
+    extend_bvhAccel = CreateBVHAccelerator(primitives, 1);
+#endif // PT_LINE_RENDER
     // Env Map
     if (data.contains("EnvMap")) {
         const auto& EnvMapData = data["EnvMap"];

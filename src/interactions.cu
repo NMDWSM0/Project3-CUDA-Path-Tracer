@@ -764,8 +764,8 @@ __host__ __device__ glm::vec3 Sample_Li_Spot(
     lightDist = glm::length(lightPos - scatterPos);
     pdf = 1.f / (TWO_PI * (1 - cosThetaMax));
 
-    float angle = glm::acos(glm::dot(-lightDir, light.u));
-    float falloff = glm::smoothstep(light.outerAngle, light.innerAngle, angle);
+    float anglecos = glm::max(glm::dot(-lightDir, light.u), 0.f);
+    float falloff = glm::smoothstep(cos(light.outerAngle), cos(light.innerAngle), anglecos);
 
     return light.emission * falloff;
 }
@@ -938,9 +938,9 @@ __device__ void getMatParams(
     if (mat.emissionmapTexId >= 0) {
         glm::vec2 uv = intersect.texCoord[mat.emissionmapTexUV];
         float4 c = tex2DLod<float4>(textureHandles[mat.emissionmapTexId], uv.x, uv.y, lod);
-        mat.emission = srgbToLinear(glm::vec3(c.x, c.y, c.z));
-        mat.emission *= mat.emissionStrength;
+        mat.emission *= srgbToLinear(glm::vec3(c.x, c.y, c.z));
     }
+    mat.emission *= mat.emissionStrength;
     if (mat.transmissionmapTexId >= 0) {
         glm::vec2 uv = intersect.texCoord[mat.transmissionmapTexUV];
         float4 c = tex2DLod<float4>(textureHandles[mat.transmissionmapTexId], uv.x, uv.y, lod);

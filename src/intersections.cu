@@ -134,8 +134,8 @@ __host__ __device__ bool getAnyHit(
             float distance = SphereIntersect(radius, position, r);
             bool inAngle = true;
             if (type == SPOTLIGHT) {
-                float angle = glm::acos(glm::dot(-r.direction, light.u));
-                if (angle > light.outerAngle)
+                float anglecos = glm::dot(-r.direction, light.u);
+                if (anglecos < cos(light.outerAngle))
                     inAngle = false;
             }
             if (distance > 0 && distance < maxt && inAngle) {
@@ -264,7 +264,9 @@ __host__ __device__ bool getClosestHit(
     glm::vec4* vertexUV,
     char* vertexSchannel,
     Material* materials,
-    ShadeableIntersection& intersection) 
+    ShadeableIntersection& intersection,
+    float normalOffset,
+    PTCullingOptions culling)
 {
     float t = INFINITY;
 
@@ -281,8 +283,6 @@ __host__ __device__ bool getClosestHit(
             glm::vec3 v = light.v;
             glm::vec3 uvcross = glm::cross(u, v);
             glm::vec3 normal = glm::normalize(uvcross);
-            //if (dot(normal, r.direction) > 0.f) // if we hit a light from back
-            //    continue;
             u *= 1.0f / glm::dot(u, u);
             v *= 1.0f / glm::dot(v, v);
             glm::vec3 position = light.position;
@@ -305,10 +305,10 @@ __host__ __device__ bool getClosestHit(
             bool inAngle = true;
             float falloff = 1.f;
             if (type == SPOTLIGHT) {
-                float angle = glm::acos(glm::dot(-r.direction, light.u));
-                if (angle > light.outerAngle)
+                float anglecos = glm::dot(-r.direction, light.u);
+                if (anglecos < cos(light.outerAngle))
                     inAngle = false;
-                falloff = glm::smoothstep(light.outerAngle, light.innerAngle, angle);
+                falloff = glm::smoothstep(cos(light.outerAngle), cos(light.innerAngle), glm::max(anglecos, 0.f));
             }
             if (distance < t && inAngle) {
                 t = distance;
@@ -352,6 +352,12 @@ __host__ __device__ bool getClosestHit(
                 temp_vp0 = vertexPos[temp_vertIds[0]];
                 temp_vp1 = vertexPos[temp_vertIds[1]];
                 temp_vp2 = vertexPos[temp_vertIds[2]];
+                if (normalOffset > 0.f) {
+                    normalOffset = glm::min((float)PT_LINE_MAXWIDTH, normalOffset);
+                    temp_vp0 += normalOffset * vertexNor[temp_vertIds[0]] * glm::length(temp_vp0 - r.origin);
+                    temp_vp1 += normalOffset * vertexNor[temp_vertIds[1]] * glm::length(temp_vp1 - r.origin);
+                    temp_vp2 += normalOffset * vertexNor[temp_vertIds[2]] * glm::length(temp_vp2 - r.origin);
+                }
                 triSchannel = glm::min(vertexSchannel[temp_vertIds[0]], glm::min(vertexSchannel[temp_vertIds[1]], vertexSchannel[temp_vertIds[2]]));
 #if PT_SHADOW_CHANNEL
                 if (!ChannelCheck[curSchannel][triSchannel]) {
@@ -366,12 +372,29 @@ __host__ __device__ bool getClosestHit(
             else if (geom.type == SPHERE)
             {
                 temp_center = geom.center;
-                distance = SphereIntersect(geom.radius, temp_center, r);
+                distance = SphereIntersect(geom.radius + glm::min((float)PT_LINE_MAXWIDTH, normalOffset) * glm::length(temp_center - r.origin), temp_center, r);
+            }
+
+            bool cull = false;
+            if (culling != PTCullingOptions::CULLNONE) {
+                glm::vec3 tempnormal;
+                if (geom.type == TRIANGLE) {
+                    tempnormal = glm::normalize(vertexNor[temp_vertIds[0]] * temp_bary.x + vertexNor[temp_vertIds[1]] * temp_bary.y + vertexNor[temp_vertIds[2]] * temp_bary.z);
+                }
+                else if (geom.type == SPHERE) {
+                    tempnormal = glm::normalize(r.origin + distance * r.direction - temp_center);
+                }
+                if (culling == PTCullingOptions::CULLFRONT) {
+                    cull = glm::dot(-r.direction, tempnormal) > 0.f;
+                }
+                else if (culling == PTCullingOptions::CULLBACK) {
+                    cull = glm::dot(-r.direction, tempnormal) < 0.f;
+                }
             }
 
             // Compute the minimum t from the intersection tests to determine what
             // scene geometry object was hit first.
-            if (distance > 0.0f && distance < t)
+            if (distance > 0.0f && distance < t &&!cull)
             {
                 t = distance;
                 hit_geom_index = curNode.geomID;

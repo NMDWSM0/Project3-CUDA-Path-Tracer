@@ -35,10 +35,12 @@
 #define PT_USEBVH 1
 
 // toon shading
-#define PT_TOON_SHADING 0
+#define PT_TOON_SHADING 1
 
 #if PT_TOON_SHADING
 #define PT_CEL_SHADING 1
 #define PT_SHADOW_CHANNEL 1
 #define PT_LINE_RENDER 1
+#define PT_LINE_SCALE 0.0012
+#define PT_LINE_MAXWIDTH 0.05
 #endif
