@@ -283,8 +283,7 @@ __global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution, int iter, glm
         int index = x + (y * resolution.x);
         glm::vec3 pix = image[index];
 
-        //glm::vec3 avgcol = pix / (float)iter;
-        glm::vec3 finalCol = gradeAndToneMap(pix, params);
+        glm::vec3 finalCol = pix;// gradeAndToneMap(pix, params);
         postimage[index] = finalCol;
 
         glm::ivec3 color;
@@ -850,7 +849,7 @@ __global__ void shadeMaterial(
             // Set up the RNG
             // LOOK: this is how you use thrust's RNG! Please look at
             // makeSeededRandomEngine as well.
-            thrust::default_random_engine rng = makeSeededRandomEngine(iter, segmentIdx, segment.remainingBounces);
+            thrust::default_random_engine rng = makeSeededRandomEngine(iter, segmentIdx, depth);
             thrust::uniform_real_distribution<float> u01(0, 1);
 
             // Hit Light
@@ -884,7 +883,7 @@ __global__ void shadeMaterial(
                 glm::vec3 intersectPos = intersection.t * segment.ray.direction + segment.ray.origin;
 
                 // add material emission - not importance sampled 
-                segment.color += segment.throughput * material.emission;         
+                segment.color += segment.throughput * material.emission;
 #if PT_MIS
                 directLight(intersection.schannel, bvhNodes, geoms, geoms_size, lightgeoms, lightgeoms_size, vertexPos, vertexSchannel, segment, intersectPos, shadingNormal, geoNormal, material, rng);
 #endif // PT_MIS
@@ -1120,15 +1119,15 @@ void pathtrace(uchar4* pbo, int maxiter, int iter)
     ///////////////////////////////////////////////////////////////////////////
 
     ColorGradingParams postprocess_params{
-        -1.0f,     // Exposure(EV)
+        0.0f,     // Exposure(EV)
         0.0f,     // White-balance:temperature [-1, +1]
         0.0f,     // White-balance:tint [-1, +1]
         1.0f,     // Saturation [0, 2]
         0.0f,     // Vibrance [0, 1] 
-        1.05f,     // Contrast [0, 2] around pivot
+        1.0f,     // Contrast [0, 2] around pivot
         0.18f,
         //tone curve
-        true,    // Whether use ACES or Reinhard-L
+        ColorGradingParams::ViewTransform::NONE,    // Whether use ACES or Reinhard-L
         0.0f,     // reinhard-L whitepoint
         // cdl params
         glm::vec3(1.0f),

@@ -10,7 +10,7 @@
         "LOOKAT": [0.0, 5.0, 0.0],
         "UP": [0.0, 1.0, 0.0],
         "FOCALLENGTH": 13.8,
-        "LENRADIUS": 0.02
+        "LENRADIUS": 0.0
     },
     "EnvMap": {
         "PATH": "./FlowerOcean.hdr"
@@ -19,7 +19,7 @@
     "Objects": [
         {
             "TYPE": "gltf",
-            "PATH": "./Flower_Castorice.glb",
+            "PATH": "./Flower_Castorice_Full.glb",
             "OVERRIDE_CAMERA": true,
             "LOAD_LIGHT": true
         }

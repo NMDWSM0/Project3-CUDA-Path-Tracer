@@ -21,7 +21,7 @@
         "disney_white": {
             "TYPE": "Disney",
             "RGB": [0.98, 0.98, 0.98],
-            "ROUGHNESS": 0.01,
+            "ROUGHNESS": 1.0,
             "METALLIC": 0.0,
             "TRANSMISSION": 0.0,
             "IOR": 1.5,

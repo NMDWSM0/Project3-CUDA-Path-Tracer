@@ -11,7 +11,7 @@
 #define PT_RUSSIAN_ROULETTE 1
 
 // hide emitters (lightmesh itself)
-#define PT_HIDE_EMITTERS 0
+#define PT_HIDE_EMITTERS 1
 
 // multiple importance sampling
 #define PT_MIS 1

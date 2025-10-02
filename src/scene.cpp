@@ -440,7 +440,6 @@ void loadMaterials(Scene* scene, tinygltf::Model& gltfModel, std::vector<bool>& 
             material.emissionmapTexUV = gltfMaterial.emissiveTexture.texCoord;
         }
             
-
         // Roughness and Metallic
         material.roughness = (float)pbr.roughnessFactor;
         material.roughness = glm::clamp(material.roughness * material.roughness, 0.001f, 1.f);
@@ -451,7 +450,6 @@ void loadMaterials(Scene* scene, tinygltf::Model& gltfModel, std::vector<bool>& 
             material.metallicRoughnessTexUV = pbr.metallicRoughnessTexture.texCoord;
         }
             
-
         // Normal Map
         if (gltfMaterial.normalTexture.index >= 0 && gltfMaterial.normalTexture.scale >= 0) {
             material.normalmapTexId = gltfMaterial.normalTexture.index + sceneTexIdx;
@@ -566,26 +564,26 @@ void loadCamera(Scene* scene, tinygltf::Model& gltfModel, const std::vector<Came
 }
 
 void loadLights(Scene* scene, tinygltf::Model& gltfModel, const std::vector<LightInstance>& lightinstances) {
+    // VERY VERY IMPORTANT: when exporting from Blender, choose "unitless" light data!!!
     for (int i = 0; i < lightinstances.size(); ++i)
     {
         const auto& lightinstance = lightinstances[i];
         const auto& _light = gltfModel.lights[lightinstance.light];  // load the first camera
         if (_light.type == "point") {
             // add a sphere light to scene
-            //LightGeom newLight(SPHERELIGHT);
-            //glm::vec3 emission = glm::vec3(_light.color[0], _light.color[1], _light.color[2]) * (float)_light.intensity;
-            //glm::vec3 position = glm::vec3(lightinstance.world[3]);
-            //glm::vec3 dir = glm::normalize(glm::mat3(lightinstance.world) * glm::vec3(0, 0, -1));
-            //newLight.emission = emission;
-            //newLight.position = position;
-            //if (_light.extras.Has("radius")) {
-            //    newLight.radius = fmax(_light.extras.Get("radius").Get<double>(), 0.01f);
-            //}
-            //else {
-            //    newLight.radius = 4.0f;
-            //}
-            //newLight.emission /= 4 * PI * PI * newLight.radius * newLight.radius;
-            //scene->lightgeoms.push_back(newLight);
+            LightGeom newLight(SPHERELIGHT);
+            glm::vec3 emission = glm::vec3(_light.color[0], _light.color[1], _light.color[2]) * (float)_light.intensity;
+            glm::vec3 position = glm::vec3(lightinstance.world[3]);
+            newLight.emission = emission;
+            newLight.position = position;
+            if (_light.extras.Has("radius")) {
+                newLight.radius = fmax(_light.extras.Get("radius").Get<double>(), 0.01f);
+            }
+            else {
+                newLight.radius = 0.5f;
+            }
+            newLight.emission /= PI * newLight.radius * newLight.radius;
+            scene->lightgeoms.push_back(newLight);
         }
         else if (_light.type == "spot") {
             // add a spot light to scene
@@ -602,9 +600,9 @@ void loadLights(Scene* scene, tinygltf::Model& gltfModel, const std::vector<Ligh
                 newLight.radius = fmax(_light.extras.Get("radius").Get<double>(), 0.01f);
             }
             else {
-                newLight.radius = 4.0f;
+                newLight.radius = 0.5f;
             }
-            newLight.emission /= 4 * PI * PI * newLight.radius * newLight.radius;
+            newLight.emission /= PI * newLight.radius * newLight.radius;
             scene->lightgeoms.push_back(newLight);
         }
         else if (_light.type == "directional") {

@@ -475,6 +475,7 @@ __host__ __device__ void Sample_f_Disney(
 #else
         wiW = cosineSampleHemisphere(ffnormal, rng);
 #endif // PT_CEL_SHADING
+        half = glm::normalize(woW + wiW);
     }
     else if (r1 < cdf[2]) {  // Dielectric + Metallic reflection
         half = sampleGTR2(m.roughness, ffnormal, rng);
@@ -596,20 +597,62 @@ __host__ __device__ glm::vec3 Sample_Li_Sphere(
     float& pdf, 
     thrust::default_random_engine& rng) 
 {
-    glm::vec3 position = light.position;
-    glm::vec3 sphereCentertoSurface = normalize(scatterPos - position);
-    glm::vec3 sampledDir = uniformSampleHemisphere(sphereCentertoSurface, rng);
+    thrust::uniform_real_distribution<float> u01(0, 1);
+    float r1 = u01(rng), r2 = u01(rng);
 
+    glm::vec3 center = light.position;
     float radius = light.radius;
-    glm::vec3 lightSurfacePos = position + sampledDir * radius;
+    glm::vec3 centerToRef = glm::normalize(scatterPos - center);
+    float distCenter = glm::length(scatterPos - center);
 
-    glm::vec3 direction = lightSurfacePos - scatterPos;
-    lightDist = glm::length(direction);
-    float distSq = lightDist * lightDist;
+    glm::vec3 directionNotNormal;
+    if (abs(centerToRef.x) < SQRT_OF_ONE_THIRD)
+    {
+        directionNotNormal = glm::vec3(1, 0, 0);
+    }
+    else if (abs(centerToRef.y) < SQRT_OF_ONE_THIRD)
+    {
+        directionNotNormal = glm::vec3(0, 1, 0);
+    }
+    else
+    {
+        directionNotNormal = glm::vec3(0, 0, 1);
+    }
 
-    lightDir = direction / lightDist;
-    lightNor = normalize(lightSurfacePos - position);
-    pdf = distSq / ((PI * radius * radius) * 0.5 * abs(glm::dot(lightNor, lightDir)));
+    // Use not-normal direction to generate two perpendicular directions
+    glm::vec3 perpendicularDirection1 =
+        glm::normalize(glm::cross(centerToRef, directionNotNormal));
+    glm::vec3 perpendicularDirection2 =
+        glm::normalize(glm::cross(centerToRef, perpendicularDirection1));
+
+    // Inside the sphere
+    if (distCenter <= radius)
+    {
+        pdf = 0.f;
+        return glm::vec3(0.f);
+    }
+
+    float sinThetaMax2 = (radius * radius) / (distCenter * distCenter);
+    float cosThetaMax = sqrt(glm::max(0.0f, 1.0f - sinThetaMax2));
+    float cosTheta = (1.0f - r1) + r1 * cosThetaMax;
+    float sinTheta2 = glm::max(0.f, 1.0f - cosTheta * cosTheta);
+    float sinTheta = sqrt(sinTheta2);
+    float phi = r2 * TWO_PI;
+
+    float ds = distCenter * cosTheta - sqrt(glm::max(0.0f, radius * radius - distCenter * distCenter * sinTheta * sinTheta));
+
+    float cosAlpha = (distCenter * distCenter + radius * radius - ds * ds) / (2 * distCenter * radius);
+    float sinAlpha = sqrt(glm::max(0.0f, 1.0f - cosAlpha * cosAlpha));
+
+    lightNor = glm::normalize(sinAlpha * cos(phi) * perpendicularDirection1
+        + sinAlpha * sin(phi) * perpendicularDirection2 
+        + cosAlpha * centerToRef);
+    glm::vec3 lightPos = lightNor * radius + center;
+
+    lightDir = glm::normalize(lightPos - scatterPos);
+    lightDist = glm::length(lightPos - scatterPos);
+    pdf = 1.f / (TWO_PI * (1 - cosThetaMax));
+
     return light.emission;
 }
 
@@ -665,20 +708,61 @@ __host__ __device__ glm::vec3 Sample_Li_Spot(
     float& pdf,
     thrust::default_random_engine& rng)
 {
-    glm::vec3 position = light.position;
-    glm::vec3 sphereCentertoSurface = normalize(scatterPos - position);
-    glm::vec3 sampledDir = uniformSampleHemisphere(sphereCentertoSurface, rng);
+    thrust::uniform_real_distribution<float> u01(0, 1);
+    float r1 = u01(rng), r2 = u01(rng);
 
+    glm::vec3 center = light.position;
     float radius = light.radius;
-    glm::vec3 lightSurfacePos = position + sampledDir * radius;
+    glm::vec3 centerToRef = glm::normalize(scatterPos - center);
+    float distCenter = glm::length(scatterPos - center);
 
-    glm::vec3 direction = lightSurfacePos - scatterPos;
-    lightDist = glm::length(direction);
-    float distSq = lightDist * lightDist;
+    glm::vec3 directionNotNormal;
+    if (abs(centerToRef.x) < SQRT_OF_ONE_THIRD)
+    {
+        directionNotNormal = glm::vec3(1, 0, 0);
+    }
+    else if (abs(centerToRef.y) < SQRT_OF_ONE_THIRD)
+    {
+        directionNotNormal = glm::vec3(0, 1, 0);
+    }
+    else
+    {
+        directionNotNormal = glm::vec3(0, 0, 1);
+    }
 
-    lightDir = direction / lightDist;
-    lightNor = normalize(lightSurfacePos - position);
-    pdf = distSq / ((PI * radius * radius) * 0.5 * abs(glm::dot(lightNor, lightDir)));
+    // Use not-normal direction to generate two perpendicular directions
+    glm::vec3 perpendicularDirection1 =
+        glm::normalize(glm::cross(centerToRef, directionNotNormal));
+    glm::vec3 perpendicularDirection2 =
+        glm::normalize(glm::cross(centerToRef, perpendicularDirection1));
+
+    // Inside the sphere
+    if (distCenter <= radius)
+    {
+        pdf = 0.f;
+        return glm::vec3(0.f);
+    }
+
+    float sinThetaMax2 = (radius * radius) / (distCenter * distCenter);
+    float cosThetaMax = sqrt(glm::max(0.0f, 1.0f - sinThetaMax2));
+    float cosTheta = (1.0f - r1) + r1 * cosThetaMax;
+    float sinTheta2 = glm::max(0.f, 1.0f - cosTheta * cosTheta);
+    float sinTheta = sqrt(sinTheta2);
+    float phi = r2 * TWO_PI;
+
+    float ds = distCenter * cosTheta - sqrt(glm::max(0.0f, radius * radius - distCenter * distCenter * sinTheta * sinTheta));
+
+    float cosAlpha = (distCenter * distCenter + radius * radius - ds * ds) / (2 * distCenter * radius);
+    float sinAlpha = sqrt(glm::max(0.0f, 1.0f - cosAlpha * cosAlpha));
+
+    lightNor = glm::normalize(sinAlpha * cos(phi) * perpendicularDirection1
+        + sinAlpha * sin(phi) * perpendicularDirection2
+        + cosAlpha * centerToRef);
+    glm::vec3 lightPos = lightNor * radius + center;
+
+    lightDir = glm::normalize(lightPos - scatterPos);
+    lightDist = glm::length(lightPos - scatterPos);
+    pdf = 1.f / (TWO_PI * (1 - cosThetaMax));
 
     float angle = glm::acos(glm::dot(-lightDir, light.u));
     float falloff = glm::smoothstep(light.outerAngle, light.innerAngle, angle);
@@ -735,7 +819,8 @@ __host__ __device__ void Sample_f(
     else if (m.type == DISNEY) {
         Sample_f_Disney(pathSegment, intersect, normal, m, rng);
     }
-    pathSegment.ray.origin += geonormal * 10.f * EPSILON;
+    float sign = glm::sign(glm::dot(pathSegment.ray.direction, geonormal));
+    pathSegment.ray.origin += geonormal * 10.f * EPSILON * sign;
 }
 
 __host__ __device__ glm::vec3 Sample_Li(
@@ -779,7 +864,8 @@ __host__ __device__ void directLight(
     thrust::default_random_engine& rng)
 {
     glm::vec3 radiance(0.f);
-    glm::vec3 scatterPos = intersect + geonormal * EPSILON * 10.f;
+    float sign = glm::sign(glm::dot(-pathSegment.ray.direction, geonormal));
+    glm::vec3 scatterPos = intersect + geonormal * EPSILON * 10.f * sign;
 
     if (lightgeoms_size == 0 || m.type == SPECULAR) { // No sample to light for perfectly specular material
         return;
@@ -795,9 +881,9 @@ __host__ __device__ void directLight(
     glm::vec3 lightEmission = Sample_Li(light, scatterPos, lightDir, lightNor, lightDist, pdf_Li, rng);
 
     // check shadow
-    float offset = EPSILON * glm::mix(100.f, 10.f, glm::dot(lightDir, geonormal));
-    Ray shadowRay = Ray(scatterPos + lightDir * offset, lightDir - 2 * offset);
-    bool inShadow = getAnyHit(shadowRay, curSchannel, bvhNodes, geoms, geoms_size, lightgeoms, lightgeoms_size, vertexPos, vertexSchannel, lightDist - EPSILON);
+    float offset = EPSILON * glm::mix(100.f, 10.f, abs(glm::dot(lightDir, geonormal)));
+    Ray shadowRay = Ray(scatterPos + lightDir * offset, lightDir);
+    bool inShadow = getAnyHit(shadowRay, curSchannel, bvhNodes, geoms, geoms_size, lightgeoms, lightgeoms_size, vertexPos, vertexSchannel, lightDist - offset - EPSILON);
 
     if (!inShadow) {
         float pdf_bsdf;
@@ -807,7 +893,7 @@ __host__ __device__ void directLight(
         if (light.type != DIRECTIONALLIGHT) // No MIS for directional light
             misWeight = powerHeuristic(pdf_Li, pdf_bsdf);
 
-        if (pdf_bsdf > 0.0)
+        if (pdf_bsdf > 0.0 && pdf_Li > 0.f)
             radiance += misWeight * (lightEmission * float(lightgeoms_size)) * bsdf / pdf_Li * pathSegment.throughput;
     }
 

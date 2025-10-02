@@ -101,7 +101,15 @@ __host__ __device__ inline glm::vec3 acesFitted(const glm::vec3& x) {
     return glm::clamp(num / den, 0.0f, 1.0f);
 }
 
+
+
 struct ColorGradingParams {
+    enum ViewTransform {
+        NONE,
+        REINHARD_L,
+        ACES
+    };
+
     float exposureEV = 0.0f;   // Exposure(EV)
     float temperature = 0.0f;  // [-1, +1]
     float tint = 0.0f;         // [-1, +1]
@@ -111,7 +119,7 @@ struct ColorGradingParams {
     float contrastPivot = 0.18f;
 
     //tone curve
-    bool useACES = true;       // ACES or Reinhard-L
+    ViewTransform viewTrans = NONE;
     float reinhardLwhite = 0.0f; 
 
     glm::vec3 cdlSlope = glm::vec3(1.0f);
@@ -133,7 +141,16 @@ __host__ __device__ inline glm::vec3 gradeAndToneMap(const glm::vec3& hdrLinear,
 
     c = applyContrast(c, P.contrast, P.contrastPivot);
 
-    glm::vec3 sdr = P.useACES ? acesFitted(c) : glm::clamp(reinhardLuminancePreserving(c, P.reinhardLwhite), 0.0f, 1.0f);
+    glm::vec3 sdr;
+    if (P.viewTrans == ColorGradingParams::ViewTransform::ACES) {
+        sdr = acesFitted(c);
+    }
+    else if (P.viewTrans == ColorGradingParams::ViewTransform::REINHARD_L) {
+        sdr = glm::clamp(reinhardLuminancePreserving(c, P.reinhardLwhite), 0.0f, 1.0f);
+    }
+    else {
+        sdr = glm::clamp(c, 0.f, 1.f);
+    }
 
     return linearToSrgb(sdr);
 }
