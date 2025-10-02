@@ -283,7 +283,7 @@ __global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution, int iter, glm
         int index = x + (y * resolution.x);
         glm::vec3 pix = image[index];
 
-        glm::vec3 finalCol = pix;// gradeAndToneMap(pix, params);
+        glm::vec3 finalCol = gradeAndToneMap(pix, params);
         postimage[index] = finalCol;
 
         glm::ivec3 color;
