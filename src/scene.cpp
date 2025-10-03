@@ -550,7 +550,7 @@ void loadCamera(Scene* scene, tinygltf::Model& gltfModel, const std::vector<Came
             glm::vec3 right = glm::normalize(glm::vec3(transform[0]));
             glm::vec3 up = glm::normalize(glm::vec3(transform[1]));
             glm::vec3 forward = -glm::normalize(glm::vec3(transform[2]));
-            glm::vec3 lookAt = position + forward;
+            glm::vec3 lookAt = position + forward * max(scene->state.camera.focalDistance, 1.f);
             // position and rotation
             scene->state.camera.position = position;
             scene->state.camera.lookAt = lookAt;

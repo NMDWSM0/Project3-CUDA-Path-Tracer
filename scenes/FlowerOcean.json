@@ -2,15 +2,15 @@
     "Materials": {},
     "Camera": {
         "RES": [1920, 1080],
-        "FOVY": 60.0,
+        "FOVY": 70.0,
         "ITERATIONS": 5000,
         "DEPTH": 10,
-        "FILE": "cornell",
+        "FILE": "FlowerOcean",
         "EYE": [28.0, 5.2, 42.6],
         "LOOKAT": [0.0, 5.0, 0.0],
         "UP": [0.0, 1.0, 0.0],
-        "FOCALDISTANCE": 17.52,
-        "LENRADIUS": 0.0238
+        "FOCALDISTANCE": 15.357,
+        "LENRADIUS": 0.015
     },
     "EnvMap": {
         "PATH": "./FlowerOcean.hdr"
@@ -23,5 +23,14 @@
             "OVERRIDE_CAMERA": true,
             "LOAD_LIGHT": true
         }
-    ]
+    ],
+    "Postprocess": {
+        "VIEWTRANSFORM": "ACES",
+        "EXPOSURE": -0.4,
+        "TEMPERATURE": 0.5,
+        "TINT": -0.7,
+        "SATURATION": 0,
+        "VIBRANCE": 0.2,
+        "CONTRAST": 0.1
+    }
 }
