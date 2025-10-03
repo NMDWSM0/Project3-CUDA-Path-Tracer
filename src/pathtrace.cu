@@ -508,8 +508,8 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
 #endif // PT_AA
         float xn = ((float)(x + offsetX) / cam.resolution.x) * 2.f - 1.f;
         float yn = ((float)(y + offsetY) / cam.resolution.y) * 2.f - 1.f;
-        float xs = xn * (aspectRatio * tan(0.5f * cam.fov.y));
-        float ys = yn * (tan(0.5f * cam.fov.y));
+        float xs = xn * (aspectRatio * tan(0.5f * cam.fov.y * PI / 180));
+        float ys = yn * (tan(0.5f * cam.fov.y * PI / 180));
         
         glm::vec3 dtocenter = glm::vec3(-xs, -ys, 1.f);
         glm::vec3 Pf = cam.focalDistance * dtocenter;        // the focus point on clear plane
@@ -1151,23 +1151,6 @@ void pathtrace(uchar4* pbo, int maxiter, int iter)
 #endif // PT_MATERIAL_SORT
     ///////////////////////////////////////////////////////////////////////////
 
-    ColorGradingParams postprocess_params{
-        0.0f,     // Exposure(EV)
-        0.0f,     // White-balance:temperature [-1, +1]
-        0.0f,     // White-balance:tint [-1, +1]
-        1.0f,     // Saturation [0, 2]
-        0.0f,     // Vibrance [0, 1] 
-        1.0f,     // Contrast [0, 2] around pivot
-        0.18f,
-        //tone curve
-        ColorGradingParams::ViewTransform::NONE,    // Whether use ACES or Reinhard-L
-        0.0f,     // reinhard-L whitepoint
-        // cdl params
-        glm::vec3(1.0f),
-        glm::vec3(0.0f),
-        glm::vec3(1.0f)
-    };
-
 #if PT_DENOISE
 #if PT_REALTIME_DENOISE
     if (iter == maxiter) {
@@ -1175,19 +1158,19 @@ void pathtrace(uchar4* pbo, int maxiter, int iter)
         oidnCommitFilter(oidn_filter);
     }
     oidnExecuteFilter(oidn_filter);
-    sendImageToPBO << <blocksPerGrid2d, blockSize2d >> > (pbo, cam.resolution, iter, dev_denoiseimage, dev_postimage, postprocess_params);
+    sendImageToPBO << <blocksPerGrid2d, blockSize2d >> > (pbo, cam.resolution, iter, dev_denoiseimage, dev_postimage, hst_scene->postparams);
 #else 
     if (iter == maxiter) {
         oidnExecuteFilter(oidn_filter);
-        sendImageToPBO << <blocksPerGrid2d, blockSize2d >> > (pbo, cam.resolution, iter, dev_denoiseimage, dev_postimage, postprocess_params);
+        sendImageToPBO << <blocksPerGrid2d, blockSize2d >> > (pbo, cam.resolution, iter, dev_denoiseimage, dev_postimage, hst_scene->postparams);
     }
     else {
-        sendImageToPBO << <blocksPerGrid2d, blockSize2d >> > (pbo, cam.resolution, iter, dev_image, dev_postimage, postprocess_params);
-        //sendImageToPBOVec4 << <blocksPerGrid2d, blockSize2d >> > (pbo, cam.resolution, iter, (glm::vec4*)dev_lines, dev_postimage, postprocess_params);
+        sendImageToPBO << <blocksPerGrid2d, blockSize2d >> > (pbo, cam.resolution, iter, dev_image, dev_postimage, hst_scene->postparams);
+        //sendImageToPBOVec4 << <blocksPerGrid2d, blockSize2d >> > (pbo, cam.resolution, iter, (glm::vec4*)dev_lines, dev_postimage, hst_scene->postparams);
     }
 #endif // PT_REALTIME_DENOISE
 #else
-    sendImageToPBO << <blocksPerGrid2d, blockSize2d >> > (pbo, cam.resolution, iter, dev_image, dev_postimage, postprocess_params);
+    sendImageToPBO << <blocksPerGrid2d, blockSize2d >> > (pbo, cam.resolution, iter, dev_image, dev_postimage, hst_scene->postparams);
 #endif // PT_DENOISE
 
     // Retrieve image from GPU

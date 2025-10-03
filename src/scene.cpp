@@ -558,10 +558,10 @@ void loadCamera(Scene* scene, tinygltf::Model& gltfModel, const std::vector<Came
             scene->state.camera.view = forward;
             scene->state.camera.right = glm::normalize(glm::cross(scene->state.camera.view, scene->state.camera.up));
             // calculate fov based on resolution
-            float fovy = cam.yfov;
-            float yscaled = tan(fovy * 0.5f);
+            float fovy = cam.yfov * 180 * INV_PI;
+            float yscaled = tan(cam.yfov * 0.5f);
             float xscaled = (yscaled * scene->state.camera.resolution.x) / scene->state.camera.resolution.y;
-            float fovx = atan(xscaled);
+            float fovx = atan(xscaled) * 180 * INV_PI;
             scene->state.camera.fov = glm::vec2(fovx, fovy);
             scene->state.camera.pixelLength = glm::vec2(2 * xscaled / (float)scene->state.camera.resolution.x,
                 2 * yscaled / (float)scene->state.camera.resolution.y);
@@ -990,6 +990,68 @@ void Scene::loadFromJSON(const std::string& jsonName)
         const auto& envmap_path = EnvMapData["PATH"];
         std::string fullenvpath = baseDir + envmap_path.get<std::string>();
         envMap.loadToCPU(fullenvpath);
+    }
+
+    // Postprocess
+    const auto& postprocessData = data["Postprocess"];
+    {
+        postparams.viewTrans = ColorGradingParams::ViewTransform::NONE;
+        if (postprocessData.contains("VIEWTRANSFORM")) {
+            if (postprocessData["VIEWTRANSFORM"] == "ACES") {
+                postparams.viewTrans = ColorGradingParams::ViewTransform::ACES;
+            }
+            else if (postprocessData["VIEWTRANSFORM"] == "REINHARD_L") {
+                postparams.viewTrans = ColorGradingParams::ViewTransform::REINHARD_L;
+            }
+        }
+        
+        postparams.exposureEV = 0.f;
+        if (postprocessData.contains("EXPOSURE")) {
+            postparams.exposureEV = postprocessData["EXPOSURE"];
+        }
+
+        postparams.temperature = 0.f;
+        if (postprocessData.contains("TEMPERATURE")) {
+            postparams.temperature = glm::clamp((float)(postprocessData["TEMPERATURE"]), -1.f, 1.f);
+        }
+        
+        postparams.tint = 0.f;
+        if (postprocessData.contains("TINT")) {
+            postparams.tint = glm::clamp((float)(postprocessData["TINT"]), -1.f, 1.f);
+        }
+
+        postparams.saturation = 0.f;
+        if (postprocessData.contains("SATURATION")) {
+            postparams.saturation = glm::clamp((float)(postprocessData["SATURATION"]), -1.f, 1.f);
+        }
+
+        postparams.vibrance = 0.f;
+        if (postprocessData.contains("VIBRANCE")) {
+            postparams.vibrance = glm::clamp((float)(postprocessData["VIBRANCE"]), 0.f, 1.f);
+        }
+
+        postparams.contrast = 0.f;
+        if (postprocessData.contains("CONTRAST")) {
+            postparams.contrast = glm::clamp((float)(postprocessData["CONTRAST"]), -1.f, 1.f);
+        }
+
+        postparams.contrastPivot = 0.18f;
+        if (postprocessData.contains("CONTRAST_PIVOT")) {
+            postparams.contrastPivot = glm::clamp((float)(postprocessData["CONTRAST_PIVOT"]), 0.f, 1.f);
+        }
+
+        if (postprocessData.contains("CDLSLOPE")) {
+            const auto& cdlSlope = postprocessData["CDLSLOPE"];
+            postparams.cdlSlope = glm::vec3(cdlSlope[0], cdlSlope[1], cdlSlope[2]);
+        }
+        if (postprocessData.contains("CDLOFFSET")) {
+            const auto& cdlOffset = postprocessData["CDLOFFSET"];
+            postparams.cdlOffset = glm::vec3(cdlOffset[0], cdlOffset[1], cdlOffset[2]);
+        }
+        if (postprocessData.contains("CDLPOWER")) {
+            const auto& cdlPower = postprocessData["CDLPOWER"];
+            postparams.cdlPower = glm::vec3(cdlPower[0], cdlPower[1], cdlPower[2]);
+        }
     }
 
     //set up render camera stuff

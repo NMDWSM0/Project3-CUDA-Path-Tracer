@@ -34,7 +34,7 @@
         "RES": [1200, 1200],
         "FOVY": 50.0,
         "ITERATIONS": 5000,
-        "DEPTH": 1,
+        "DEPTH": 8,
         "FILE": "cornell",
         "EYE": [0.0, 5.0, 17.0],
         "LOOKAT": [0.0, 5.0, 0.0],
@@ -91,5 +91,17 @@
             "ROTAT": [0.0, 180.0, 0.0],
             "SCALE": [1.0, 1.0, 1.0]
         }
-    ]
+    ],
+    "Postprocess": {
+        "VIEWTRANSFORM": "ACES",
+        "EXPOSURE": 0,
+        "TEMPERATURE": 0,
+        "TINT": 0,
+        "SATURATION": 0,
+        "VIBRANCE": 0.0,
+        "CONTRAST": 0.0,
+        "CDLSLOPE": [1.0, 1.0, 1.0],
+        "CDLOFFSET": [0.0, 0.0, 0.0],
+        "CDLPOWER": [1.0, 1.0, 1.0]
+    }
 }

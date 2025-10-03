@@ -1,5 +1,6 @@
 #pragma once
 
+#include "postprocess.h"
 #include "sceneStructs.h"
 #include "bvh.h"
 #include <vector>
@@ -24,4 +25,5 @@ public:
     RenderState state;
     std::shared_ptr<BVHAccel> bvhAccel;
     std::shared_ptr<BVHAccel> extend_bvhAccel;
+    ColorGradingParams postparams;
 };

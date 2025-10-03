@@ -113,9 +113,9 @@ struct ColorGradingParams {
     float exposureEV = 0.0f;   // Exposure(EV)
     float temperature = 0.0f;  // [-1, +1]
     float tint = 0.0f;         // [-1, +1]
-    float saturation = 1.0f;   // 0..2
-    float vibrance = 0.0f;     // 0..1 
-    float contrast = 1.0f;     // 0..2 around pivot
+    float saturation = 0.0f;   // [-1, +1]
+    float vibrance = 0.0f;     // [ 0, +1]
+    float contrast = 0.0f;     // [-1, +1] around pivot
     float contrastPivot = 0.18f;
 
     //tone curve
@@ -137,9 +137,9 @@ __host__ __device__ inline glm::vec3 gradeAndToneMap(const glm::vec3& hdrLinear,
     c = applyASC_CDL(c, P.cdlSlope, P.cdlOffset, P.cdlPower);
 
     if (P.vibrance != 0.0f) c = applyVibrance(c, P.vibrance);
-    c = applySaturation(c, P.saturation);
+    c = applySaturation(c, P.saturation + 1.f);
 
-    c = applyContrast(c, P.contrast, P.contrastPivot);
+    c = applyContrast(c, P.contrast + 1.f, P.contrastPivot);
 
     glm::vec3 sdr;
     if (P.viewTrans == ColorGradingParams::ViewTransform::ACES) {
