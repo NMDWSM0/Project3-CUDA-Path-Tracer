@@ -138,7 +138,7 @@ public:
     std::vector<std::shared_ptr<Primitive>> primitives;
     LinearBVHNode* nodes = nullptr;
     BVHBuildNode* root = nullptr;
-    int totalNodes;
+    int totalNodes = 0;
 };
 
 std::shared_ptr<BVHAccel> CreateBVHAccelerator(std::vector<std::shared_ptr<Primitive>>& prims, int maxPrimsInNode);

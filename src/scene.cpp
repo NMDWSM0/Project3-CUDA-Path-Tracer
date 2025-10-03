@@ -509,8 +509,7 @@ void loadMaterials(Scene* scene, tinygltf::Model& gltfModel, std::vector<bool>& 
         }
 
         // line color
-        // -2.0 : do not cast lines, but can other objects can draw lines on (default)
-        // -1.0 : do not cast lines, and other objects cannot draw lines on (completely disable)
+        // < 0 : do not draw lines (default)
         // 0.0 : draw lines, and use object color mix with black for line color
         // 0 - 1 : draw lines, and use the input RGB color
         material.linecolor = glm::vec3(-2.f);
@@ -522,6 +521,12 @@ void loadMaterials(Scene* scene, tinygltf::Model& gltfModel, std::vector<bool>& 
             if (r > 0.f || g > 0.f || b > 0.f) {
                 material.linecolor = srgbToLinear(material.linecolor);
             }
+        }
+
+        // toon shading
+        material.toonshading = false;
+        if (gltfMaterial.extras.Has("my_toonshading")) {
+            material.toonshading = gltfMaterial.extras.Get("my_toonshading").Get<bool>();
         }
 
         scene->materials.push_back(material);
@@ -721,11 +726,11 @@ void Scene::loadFromJSON(const std::string& jsonName)
         camera.pixelLength = glm::vec2(2 * xscaled / (float)camera.resolution.x,
             2 * yscaled / (float)camera.resolution.y);
         // dof related params
-        if (cameraData.contains("FOCALLENGTH")) {
-            camera.focalLength = cameraData["FOCALLENGTH"];
+        if (cameraData.contains("FOCALDISTANCE")) {
+            camera.focalDistance = cameraData["FOCALDISTANCE"];
         }
         else {
-            camera.focalLength = 1.f;
+            camera.focalDistance = 10.f;
         }
         if (cameraData.contains("LENRADIUS")) {
             camera.lenRadius = cameraData["LENRADIUS"];
@@ -750,7 +755,6 @@ void Scene::loadFromJSON(const std::string& jsonName)
             const auto& col = p["RGB"];
             newMaterial.color = srgbToLinear(glm::vec3(col[0], col[1], col[2]));
             newMaterial.type = DIFFUSE;
-            newMaterial.linecolor = glm::vec3(-2.f);
         }
         else if (p["TYPE"] == "Specular")
         {
@@ -759,7 +763,6 @@ void Scene::loadFromJSON(const std::string& jsonName)
             newMaterial.transmission = p.value("TRANSMISSION", 0.f);
             newMaterial.ior = p.value("IOR", 1.5f);
             newMaterial.type = SPECULAR;
-            newMaterial.linecolor = glm::vec3(-2.f);
         }
         else if (p["TYPE"] == "Disney")
         {
@@ -778,12 +781,15 @@ void Scene::loadFromJSON(const std::string& jsonName)
             newMaterial.coatroughness = glm::mix(0.1f, 0.001f, coatGlossiness);
             newMaterial.subsurface = p.value("SUBSURFACE", 0.f);
             newMaterial.type = DISNEY;
-            newMaterial.linecolor = glm::vec3(-2.f);
         }
+
+        newMaterial.linecolor = glm::vec3(-2.f);
         if (p.contains("LINECOLOR")) {
             const auto& linecolor = p["LINECOLOR"];
-            newMaterial.linecolor = glm::vec3(linecolor[0], linecolor[1], linecolor[2]);
+            newMaterial.linecolor = srgbToLinear(glm::vec3(linecolor[0], linecolor[1], linecolor[2]));
         }
+        newMaterial.toonshading = p.value("TOON", false);
+
         MatNameToID[name] = materials.size();
         materials.push_back(newMaterial);
     }

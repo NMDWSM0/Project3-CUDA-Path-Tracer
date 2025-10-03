@@ -6,10 +6,12 @@
 
 #include <thrust/random.h>
 
-constexpr float __device__ toonCos = 0.1f; 
+#if PT_CEL_SHADING
+constexpr float __device__ toonCos = 0.1f;
 constexpr float __device__ toonGradientCos = 0.05f; // toonCos + toonGradientCos < 1
 constexpr float __device__ toonPdf = 1.f / (2.f * (1 - toonCos)) * INV_PI;
 constexpr float __device__ toonBsdfCoeff = (1.f - toonCos) / (1 - 0.5f * toonGradientCos - toonCos);
+#endif
 
 __host__ __device__ glm::vec3 cosineSampleHemisphere(
     glm::vec3 normal,
@@ -229,6 +231,12 @@ __host__ __device__ glm::vec3 F_Diffuse(
     const Material& m,
     float& pdf)
 {
+#if PT_CEL_SHADING
+    if (m.toonshading) {
+        pdf = toonPdf;
+        return m.color * toonPdf * glm::smoothstep(toonCos, toonCos + toonGradientCos, glm::dot(wiW, normal)) * toonBsdfCoeff;
+    }
+#endif
     pdf = glm::dot(wiW, normal) * INV_PI;
     return m.color * INV_PI * abs(glm::dot(wiW, normal));
 }
@@ -301,20 +309,22 @@ __host__ __device__ glm::vec3 F_Disney(
     float tmpPdf = 0.f;
     const float VDotH = abs(glm::dot(woW, half));
     // Diffuse
-#if PT_CEL_SHADING
     glm::vec3 diffuse_bsdf(0.f);  // not multiplied by absdot
     if (diffPr > 0.f && reflect) {
-        if (NdotL > toonCos) {
-            diffuse_bsdf = m.color * toonPdf * glm::smoothstep(toonCos, toonCos + toonGradientCos, NdotL) * toonBsdfCoeff;
-            pdf += toonPdf * diffPr;
+#if PT_CEL_SHADING
+        if (m.toonshading) {
+            if (NdotL > toonCos) {
+                diffuse_bsdf = m.color * toonPdf * glm::smoothstep(toonCos, toonCos + toonGradientCos, NdotL) * toonBsdfCoeff;
+                pdf += toonPdf * diffPr;
+            }
+        }
+        else
+#endif // PT_CEL_SHADING
+        {
+            bsdf += evaluateDisneyDiffuse(m, woW, wiW, half, ffnormal, tmpPdf) * dielectricWeight;
+            pdf += tmpPdf * diffPr;
         }
     }
-#else
-    if (diffPr > 0.f && reflect) {
-        bsdf += evaluateDisneyDiffuse(m, woW, wiW, half, ffnormal, tmpPdf) * dielectricWeight;
-        pdf += tmpPdf * diffPr;
-    }
-#endif // PT_CEL_SHADING
 
     // Dielectric Reflection
     if (dielectricPr > 0.f && reflect) {
@@ -471,10 +481,14 @@ __host__ __device__ void Sample_f_Disney(
     glm::vec3 half;
     if (r1 < cdf[0]) {       // Diffuse
 #if PT_CEL_SHADING
-        wiW = uniformSampleAngleHemisphere(ffnormal, toonCos, rng);
-#else
-        wiW = cosineSampleHemisphere(ffnormal, rng);
+        if (m.toonshading) {
+            wiW = uniformSampleAngleHemisphere(ffnormal, toonCos, rng);
+        }
+        else
 #endif // PT_CEL_SHADING
+        {
+            wiW = cosineSampleHemisphere(ffnormal, rng);
+        }
         half = glm::normalize(woW + wiW);
     }
     else if (r1 < cdf[2]) {  // Dielectric + Metallic reflection
@@ -515,20 +529,22 @@ __host__ __device__ void Sample_f_Disney(
     float tmpPdf = 0.f;
     const float VDotH = abs(glm::dot(woW, half));
     // Diffuse
-#if PT_CEL_SHADING
     glm::vec3 diffuse_bsdf(0.f);  // not multiplied by absdot
     if (diffPr > 0.f && reflect) {
-        if (ffNdotL > toonCos) {
-            diffuse_bsdf = m.color * toonPdf * glm::smoothstep(toonCos, toonCos + toonGradientCos, ffNdotL) * toonBsdfCoeff;
-            pdf += toonPdf * diffPr;
+#if PT_CEL_SHADING
+        if (m.toonshading) {
+            if (ffNdotL > toonCos) {
+                diffuse_bsdf = m.color * toonPdf * glm::smoothstep(toonCos, toonCos + toonGradientCos, ffNdotL) * toonBsdfCoeff;
+                pdf += toonPdf * diffPr;
+            }
+        }
+        else
+#endif // PT_CEL_SHADING
+        {
+            bsdf += evaluateDisneyDiffuse(m, woW, wiW, half, ffnormal, tmpPdf) * dielectricWeight;
+            pdf += tmpPdf * diffPr;
         }
     }
-#else
-    if (diffPr > 0.f && reflect) {
-        bsdf += evaluateDisneyDiffuse(m, woW, wiW, half, ffnormal, tmpPdf) * dielectricWeight;
-        pdf += tmpPdf * diffPr;
-    }
-#endif // PT_CEL_SHADING
 
     // Dielectric Reflection
     if (dielectricPr > 0.f && reflect) {
@@ -908,6 +924,11 @@ __device__ void getMatParams(
     cudaTextureObject_t* textureHandles,
     float lod)
 {
+    // if no textures
+    if (!textureHandles) {
+        mat.emission *= mat.emissionStrength;
+        return;
+    }
     // parse textures
     if (mat.baseColorTexId >= 0) {
         glm::vec2 uv = intersect.texCoord[mat.baseColorTexUV];

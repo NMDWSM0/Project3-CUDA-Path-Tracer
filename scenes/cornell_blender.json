@@ -8,7 +8,7 @@
         "EYE": [0.0, 5.0, 17.0],
         "LOOKAT": [0.0, 5.0, 0.0],
         "UP": [0.0, 1.0, 0.0],
-        "FOCALLENGTH": 16.8,
+        "FOCALDISTANCE": 16.8,
         "LENRADIUS": 0.0
     },
     "Objects": [

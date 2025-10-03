@@ -2,7 +2,7 @@
 #define BVH_PRINT_BUILD_INFO 1
 
 // error check
-#define PT_ERRORCHECK 0
+#define PT_ERRORCHECK 1
 
 // material sort
 #define PT_MATERIAL_SORT 1
@@ -38,9 +38,11 @@
 #define PT_TOON_SHADING 1
 
 #if PT_TOON_SHADING
+
 #define PT_CEL_SHADING 1
 #define PT_SHADOW_CHANNEL 1
-#define PT_LINE_RENDER 0
+#define PT_LINE_RENDER 1
 #define PT_LINE_SCALE 0.001
 #define PT_LINE_MAXWIDTH 0.05
+
 #endif

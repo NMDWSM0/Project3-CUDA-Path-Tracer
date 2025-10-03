@@ -111,38 +111,39 @@ struct Material
     float subsurface;
     float emissionStrength;
     float normalStrength;
-    int baseColorTexId;
-    int baseColorTexUV;
-    int metallicRoughnessTexId;
-    int metallicRoughnessTexUV;
-    int normalmapTexId;
-    int normalmapTexUV;
-    int emissionmapTexId;
-    int emissionmapTexUV;
-    int transmissionmapTexId;
-    int transmissionmapTexUV;
+    int baseColorTexId = -1;
+    int baseColorTexUV = 0;
+    int metallicRoughnessTexId = -1;
+    int metallicRoughnessTexUV = 0;
+    int normalmapTexId = -1;
+    int normalmapTexUV = 0;
+    int emissionmapTexId = -1;
+    int emissionmapTexUV = 0;
+    int transmissionmapTexId = -1;
+    int transmissionmapTexUV = 0;
+    bool toonshading = false;
 
-    __host__ __device__ Material() : 
-        type(DIFFUSE), 
-        color(1.f), 
-        normalStrength(1.f), 
-        baseColorTexId(-1), 
-        metallicRoughnessTexId(-1), 
-        normalmapTexId(-1), 
-        emissionmapTexId(-1), 
-        transmissionmapTexId(-1)
-    {};
+    //__host__ __device__ Material() : 
+    //    type(DIFFUSE), 
+    //    color(1.f), 
+    //    normalStrength(1.f), 
+    //    baseColorTexId(-1), 
+    //    metallicRoughnessTexId(-1), 
+    //    normalmapTexId(-1), 
+    //    emissionmapTexId(-1), 
+    //    transmissionmapTexId(-1)
+    //{};
 
-    __host__ __device__ Material(const Material& other) {
-        std::memcpy(this, &other, sizeof(Material));
-    }
+    //__host__ __device__ Material(const Material& other) {
+    //    std::memcpy(this, &other, sizeof(Material));
+    //}
 
-    __host__ __device__ Material& operator=(const Material& other) {
-        if (this != &other) {
-            std::memcpy(this, &other, sizeof(Material));
-        }
-        return *this;
-    }
+    //__host__ __device__ Material& operator=(const Material& other) {
+    //    if (this != &other) {
+    //        std::memcpy(this, &other, sizeof(Material));
+    //    }
+    //    return *this;
+    //}
 };
 
 struct RenderLine
@@ -185,7 +186,7 @@ struct Camera
     glm::vec3 right;
     glm::vec2 fov;
     glm::vec2 pixelLength;
-    float focalLength;
+    float focalDistance;
     float lenRadius;
     bool autoFocus;
 };

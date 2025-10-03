@@ -106,6 +106,7 @@ void pathtraceInit(Scene* scene)
 
     cudaMalloc(&dev_postimage, pixelcount * sizeof(glm::vec3));
     cudaMemset(dev_postimage, 0, pixelcount * sizeof(glm::vec3));
+    checkCUDAError("initialize images");
 
     cudaMalloc(&dev_GB_position, pixelcount * sizeof(glm::vec3));
     cudaMemset(dev_GB_position, 0, pixelcount * sizeof(glm::vec3));
@@ -115,37 +116,55 @@ void pathtraceInit(Scene* scene)
 
     cudaMalloc(&dev_GB_normal, pixelcount * sizeof(glm::vec3));
     cudaMemset(dev_GB_normal, 0, pixelcount * sizeof(glm::vec3));
+    checkCUDAError("initialize GBuffers");
 
     cudaMalloc(&dev_lines, pixelcount * sizeof(RenderLine));
     cudaMemset(dev_lines, 0, pixelcount * sizeof(RenderLine));
+    checkCUDAError("initialize lines");
 
     cudaMalloc(&dev_paths_A, pixelcount * sizeof(PathSegment));
     cudaMalloc(&dev_paths_B, pixelcount * sizeof(PathSegment));
+    checkCUDAError("initialize PathSegment");
 
     cudaMalloc(&dev_geoms, scene->geoms.size() * sizeof(Geom));
     cudaMemcpy(dev_geoms, scene->geoms.data(), scene->geoms.size() * sizeof(Geom), cudaMemcpyHostToDevice);
+    checkCUDAError("initialize geoms");
 
     cudaMalloc(&dev_lightgeoms, scene->lightgeoms.size() * sizeof(LightGeom));
     cudaMemcpy(dev_lightgeoms, scene->lightgeoms.data(), scene->lightgeoms.size() * sizeof(LightGeom), cudaMemcpyHostToDevice);
+    checkCUDAError("initialize lights");
 
     cudaMalloc(&dev_bvhnodes, scene->bvhAccel->totalNodes * sizeof(LinearBVHNode));
-    cudaMemcpy(dev_bvhnodes, scene->bvhAccel->nodes, scene->bvhAccel->totalNodes * sizeof(LinearBVHNode), cudaMemcpyHostToDevice);
+    if (scene->bvhAccel->totalNodes > 0) {
+        cudaMemcpy(dev_bvhnodes, scene->bvhAccel->nodes, scene->bvhAccel->totalNodes * sizeof(LinearBVHNode), cudaMemcpyHostToDevice);
+    }
+    checkCUDAError("initialize bvh");
 
 #if PT_LINE_RENDER
     cudaMalloc(&dev_extendbvhnodes, scene->extend_bvhAccel->totalNodes * sizeof(LinearBVHNode));
-    cudaMemcpy(dev_extendbvhnodes, scene->extend_bvhAccel->nodes, scene->extend_bvhAccel->totalNodes * sizeof(LinearBVHNode), cudaMemcpyHostToDevice);
+    if (scene->extend_bvhAccel->totalNodes > 0) {
+        cudaMemcpy(dev_extendbvhnodes, scene->extend_bvhAccel->nodes, scene->extend_bvhAccel->totalNodes * sizeof(LinearBVHNode), cudaMemcpyHostToDevice);
+    }
+    checkCUDAError("initialize extendbvh");
 #endif // PT_LINE_RENDER
 
     cudaMalloc(&dev_materials, scene->materials.size() * sizeof(Material));
-    cudaMemcpy(dev_materials, scene->materials.data(), scene->materials.size() * sizeof(Material), cudaMemcpyHostToDevice);
+    if (scene->materials.size() > 0) {
+        cudaMemcpy(dev_materials, scene->materials.data(), scene->materials.size() * sizeof(Material), cudaMemcpyHostToDevice);
+    }
+    checkCUDAError("initialize materials");
 
     cudaMalloc(&dev_mattypes, scene->materials.size() * sizeof(char));
     std::vector<char> mattypes;
     for (auto& m : scene->materials) { mattypes.push_back((char)(m.type)); }
-    cudaMemcpy(dev_mattypes, mattypes.data(), scene->materials.size() * sizeof(char), cudaMemcpyHostToDevice);
+    if (scene->materials.size() > 0) {
+        cudaMemcpy(dev_mattypes, mattypes.data(), scene->materials.size() * sizeof(char), cudaMemcpyHostToDevice);
+    }
+    checkCUDAError("initialize mattypes");
 
     cudaMalloc(&dev_intersections, pixelcount * sizeof(ShadeableIntersection));
     cudaMemset(dev_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
+    checkCUDAError("initialize intersections");
 
     cudaMalloc(&dev_vertPos, scene->vertPos.size() * sizeof(glm::vec3));
     cudaMemcpy(dev_vertPos, scene->vertPos.data(), scene->vertPos.size() * sizeof(glm::vec3), cudaMemcpyHostToDevice);
@@ -158,20 +177,25 @@ void pathtraceInit(Scene* scene)
 
     cudaMalloc(&dev_vertSchannel, scene->vertSchannel.size() * sizeof(char));
     cudaMemcpy(dev_vertSchannel, scene->vertSchannel.data(), scene->vertSchannel.size() * sizeof(char), cudaMemcpyHostToDevice);
+    checkCUDAError("initialize vertex buffers");
 
     cudaMalloc(&dev_pathremains, pixelcount * sizeof(int));
     cudaMalloc(&dev_pathindices, pixelcount * sizeof(int));
+    checkCUDAError("initialize compaction related buffers");
 
     envmaphandle = scene->envMap.loadToCuda();
+    checkCUDAError("initialize envmap");
 
     cudaMalloc(&dev_texurehandles, scene->textures.size() * sizeof(cudaTextureObject_t));
     for (int i = 0; i < scene->textures.size(); ++i) {
         auto handle = scene->textures[i].loadToCuda();
         cudaMemcpy(dev_texurehandles + i, &handle, sizeof(cudaTextureObject_t), cudaMemcpyHostToDevice);
     }
+    checkCUDAError("initialize textures");
 
     // buffer size used for scan should be bigger
     StreamCompaction::EfficientSharedMem::initializeBuffers(pixelcount_pot);
+    checkCUDAError("EfficientSharedMem::initializeBuffers");
 
     // init oidn
     OIDNDevice dev = oidnNewCUDADevice(&oidn_deviceID, &oidn_stream, 1);
@@ -263,7 +287,22 @@ void pathtraceClear()
     checkCUDAError("pathtraceClear");
 }
 
-
+bool pathtraceFocusOnPixel(int px, int py) {
+    Camera& cam = hst_scene->state.camera;
+    int offset = px + py * cam.resolution.x;
+    glm::vec3 pos;
+    cudaMemcpy(&pos, dev_GB_position + offset, sizeof(glm::vec3), cudaMemcpyDeviceToHost);
+    if (glm::length(pos - cam.position) > 100000.f) {
+        return false;
+    }
+    float distance = glm::dot(pos - cam.position, cam.view);
+    std::cout << distance << std::endl;
+    if (abs(cam.focalDistance - distance) < EPSILON) {
+        return false;
+    }
+    cam.focalDistance = distance;
+    return true;
+}
 
 
 
@@ -416,18 +455,18 @@ __global__ void generateGBufferRayFromCamera(Camera cam, PathSegment* pathSegmen
         int index = x + (y * cam.resolution.x);
         PathSegment& segment = pathSegments[index];
 
-        segment.ray.origin = cam.position;
         segment.throughput = glm::vec3(1.0f);
         segment.color = glm::vec3(0.f);
-
-        segment.ray.direction = glm::normalize(cam.view
-            - cam.right * cam.pixelLength.x * ((float)x - (float)cam.resolution.x * 0.5f + offset.x)
-            - cam.up * cam.pixelLength.y * ((float)y - (float)cam.resolution.y * 0.5f + offset.y)
-        );
-
         segment.pixelIndex = index;
         segment.remainingBounces = 1;
         segment.schannel = 0;
+
+        // gbuffer ray, no DOF applied, offset is input for 2xSSAA
+        segment.ray.origin = cam.position;
+        segment.ray.direction = glm::normalize(cam.view
+            - cam.right * cam.pixelLength.x * ((float)x - (float)cam.resolution.x * 0.5f + offset.x + 0.5f)
+            - cam.up * cam.pixelLength.y * ((float)y - (float)cam.resolution.y * 0.5f + offset.y + 0.5f)
+        );
     }
 }
 
@@ -451,41 +490,42 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
         thrust::default_random_engine rng = makeSeededRandomEngine(iter, index, 114514);
         thrust::uniform_real_distribution<float> u01(0, 1);
 
-        segment.ray.origin = cam.position;
         segment.throughput = glm::vec3(1.0f);
         segment.color = glm::vec3(0.f);
-
-        segment.ray.direction = glm::normalize(cam.view
-            - cam.right * cam.pixelLength.x * ((float)x - (float)cam.resolution.x * 0.5f)
-            - cam.up * cam.pixelLength.y * ((float)y - (float)cam.resolution.y * 0.5f)
-        );
-
-#if PT_DOF
-        if (cam.lenRadius > 0.f) {
-            glm::vec3 focusPoint = cam.position + cam.focalLength * segment.ray.direction;
-            // sample on len circle
-            float rad = sqrtf(u01(rng)) * cam.lenRadius;
-            float theta = TWO_PI * u01(rng);
-            float lensSampleX = rad * cos(theta);
-            float lensSampleY = rad * sin(theta);
-            glm::vec3 offset = cam.right * lensSampleX + cam.up * lensSampleY;
-            segment.ray.origin = cam.position + offset;
-            segment.ray.direction = glm::normalize(focusPoint - segment.ray.origin);
-        }
-#endif // PT_DOF
-
-#if PT_AA
-        // antialiasing by jittering the ray
-        segment.ray.direction += (
-            cam.right * cam.pixelLength.x * (u01(rng) - 0.5f) +
-            cam.up * cam.pixelLength.y * (u01(rng) - 0.5f)
-        );
-        segment.ray.direction = glm::normalize(segment.ray.direction);
-#endif // PT_AA
-
         segment.pixelIndex = index;
         segment.remainingBounces = traceDepth;
         segment.schannel = 0;
+
+        float aspectRatio = (float)cam.resolution.x / cam.resolution.y;
+        float apertureR = cam.lenRadius;
+#if !PT_DOF
+        apertureR = 0.f;
+#endif // !PT_DOF
+#if PT_AA
+        // antialiasing by jittering the ray
+        float offsetX = u01(rng);
+        float offsetY = u01(rng);
+#endif // PT_AA
+        float xn = ((float)(x + offsetX) / cam.resolution.x) * 2.f - 1.f;
+        float yn = ((float)(y + offsetY) / cam.resolution.y) * 2.f - 1.f;
+        float xs = xn * (aspectRatio * tan(0.5f * cam.fov.y));
+        float ys = yn * (tan(0.5f * cam.fov.y));
+        
+        glm::vec3 dtocenter = glm::vec3(-xs, -ys, 1.f);
+        glm::vec3 Pf = cam.focalDistance * dtocenter;        // the focus point on clear plane
+
+        float rad = sqrtf(u01(rng)) * apertureR;
+        float theta = TWO_PI * u01(rng);
+        float lensSampleX = rad * cos(theta);
+        float lensSampleY = rad * sin(theta);
+        glm::vec3 Apoint(lensSampleX, lensSampleY, 0.f);     // radom point on aperture
+
+        // local space origin and direction
+        glm::vec3 origin = Apoint;
+        glm::vec3 dir = glm::normalize(Pf - Apoint);
+
+        segment.ray.origin = cam.position + origin.x * cam.right + origin.y * cam.up + origin.z * cam.view;
+        segment.ray.direction = glm::normalize(dir.x * cam.right + dir.y * cam.up + dir.z * cam.view);
     }
 }
 
@@ -1088,6 +1128,7 @@ void pathtrace(uchar4* pbo, int maxiter, int iter)
         int remain_num_paths = StreamCompaction::EfficientSharedMem::partitionStable(num_paths, sizeof(PathSegment), dev_paths_next, dev_paths, dev_pathremains);
 #endif // PT_MATERIAL_SORT
         cudaDeviceSynchronize();
+        checkCUDAError("shadeMaterial");
 
         last_num_paths = num_paths;
         num_paths = remain_num_paths;

@@ -31,10 +31,12 @@ static bool leftMousePressed = false;
 static bool rightMousePressed = false;
 static bool middleMousePressed = false;
 static bool ctrlPressed = false;
+static bool shiftPressed = false;
 static double lastX;
 static double lastY;
 
 static bool camchanged = true;
+static bool focuschanged = false;
 static float dtheta = 0, dphi = 0;
 static glm::vec3 cammove;
 
@@ -445,6 +447,11 @@ void runCuda()
         cameraPosition += cam.lookAt;
         cam.position = cameraPosition;
         camchanged = false;
+        focuschanged = false;
+    }
+    else if (focuschanged) {
+        iteration = 0;
+        focuschanged = false;
     }
 
     // Map OpenGL buffer object for writing from CUDA on a single GPU
@@ -502,11 +509,17 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
             case GLFW_KEY_LEFT_CONTROL:
                 ctrlPressed = true;
                 break;
+            case GLFW_KEY_LEFT_SHIFT:
+                shiftPressed = true;
+                break;
         }
     }
     else if (action == GLFW_RELEASE) {
         if (key == GLFW_KEY_LEFT_CONTROL) {
             ctrlPressed = false;
+        }
+        if (key == GLFW_KEY_LEFT_SHIFT) {
+            shiftPressed = false;
         }
     }
 }
@@ -521,6 +534,23 @@ void mouseButtonCallback(GLFWwindow* window, int button, int action, int mods)
     leftMousePressed = (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS);
     rightMousePressed = (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_PRESS);
     middleMousePressed = (button == GLFW_MOUSE_BUTTON_MIDDLE && action == GLFW_PRESS);
+
+    // click the window
+    if (shiftPressed && button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS) {
+        double xpos, ypos;
+        glfwGetCursorPos(window, &xpos, &ypos);
+
+        int winW, winH, fbW, fbH;
+        glfwGetWindowSize(window, &winW, &winH);
+        glfwGetFramebufferSize(window, &fbW, &fbH);
+
+        float scaleX = fbW / (float)winW;
+        float scaleY = fbH / (float)winH;
+
+        int px = int((winW - xpos - 1) * scaleX);
+        int py = int(ypos * scaleY);
+        focuschanged = pathtraceFocusOnPixel(px, py);
+    }
 }
 
 void mousePositionCallback(GLFWwindow* window, double xpos, double ypos)
