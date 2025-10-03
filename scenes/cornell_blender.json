@@ -2,7 +2,7 @@
     "Camera": {
         "RES": [1080, 1080],
         "FOVY": 60.0,
-        "ITERATIONS": 24,
+        "ITERATIONS": 4096,
         "DEPTH": 10,
         "FILE": "Cornell_Blender",
         "EYE": [0.0, 5.0, 17.0],

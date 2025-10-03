@@ -452,7 +452,7 @@ void loadMaterials(Scene* scene, tinygltf::Model& gltfModel, std::vector<bool>& 
         }
             
         // Normal Map
-        if (gltfMaterial.normalTexture.index >= 0 && gltfMaterial.normalTexture.scale >= 0) {
+        if (gltfMaterial.normalTexture.index > -1 && gltfMaterial.normalTexture.scale >= 0) {
             material.normalmapTexId = gltfMaterial.normalTexture.index + sceneTexIdx;
             material.normalmapTexUV = gltfMaterial.normalTexture.texCoord;
             material.normalStrength = gltfMaterial.normalTexture.scale;
@@ -526,7 +526,6 @@ void loadMaterials(Scene* scene, tinygltf::Model& gltfModel, std::vector<bool>& 
 
         scene->materials.push_back(material);
     }
-
     // Default material
     if (scene->materials.size() == 0)
     {
@@ -744,13 +743,14 @@ void Scene::loadFromJSON(const std::string& jsonName)
     {
         const auto& name = item.key();
         const auto& p = item.value();
-        Material newMaterial{};
+        Material newMaterial;
         // handle materials loading
         if (p["TYPE"] == "Diffuse")
         {
             const auto& col = p["RGB"];
             newMaterial.color = srgbToLinear(glm::vec3(col[0], col[1], col[2]));
             newMaterial.type = DIFFUSE;
+            newMaterial.linecolor = glm::vec3(-2.f);
         }
         else if (p["TYPE"] == "Specular")
         {
@@ -759,6 +759,7 @@ void Scene::loadFromJSON(const std::string& jsonName)
             newMaterial.transmission = p.value("TRANSMISSION", 0.f);
             newMaterial.ior = p.value("IOR", 1.5f);
             newMaterial.type = SPECULAR;
+            newMaterial.linecolor = glm::vec3(-2.f);
         }
         else if (p["TYPE"] == "Disney")
         {
@@ -777,9 +778,14 @@ void Scene::loadFromJSON(const std::string& jsonName)
             newMaterial.coatroughness = glm::mix(0.1f, 0.001f, coatGlossiness);
             newMaterial.subsurface = p.value("SUBSURFACE", 0.f);
             newMaterial.type = DISNEY;
+            newMaterial.linecolor = glm::vec3(-2.f);
+        }
+        if (p.contains("LINECOLOR")) {
+            const auto& linecolor = p["LINECOLOR"];
+            newMaterial.linecolor = glm::vec3(linecolor[0], linecolor[1], linecolor[2]);
         }
         MatNameToID[name] = materials.size();
-        materials.emplace_back(newMaterial);
+        materials.push_back(newMaterial);
     }
 
     // Lights
