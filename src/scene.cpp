@@ -690,6 +690,10 @@ void Scene::loadFromJSON(const std::string& jsonName)
     }
 
     std::ifstream f(jsonName);
+    if (!f.is_open()) {
+        std::cerr << "File open failed: " << jsonName << std::endl;
+        exit(-1);
+    }
     json data = json::parse(f);
 
     // Camera ans State settings
