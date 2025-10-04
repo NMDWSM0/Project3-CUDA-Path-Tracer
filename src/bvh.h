@@ -27,6 +27,8 @@ public:
 
     glm::vec3 Diagonal() const { return pMax - pMin; }
 
+    glm::vec3 Center() const { return 0.5f * (pMax + pMin); }
+
     float SurfaceArea() const {
         glm::vec3 d = Diagonal();
         return 2 * (d.x * d.y + d.x * d.z + d.y * d.z);

@@ -371,48 +371,6 @@ __global__ void sendImageToPBOVec4(uchar4* pbo, glm::ivec2 resolution, int iter,
     }
 }
 
-__device__ __constant__ float G3x3[9] = {
-    1.f, 2.f, 1.f,
-    2.f, 4.f, 2.f,
-    1.f, 2.f, 1.f
-};
-
-__global__ void blurLinesR(glm::ivec2 resolution, RenderLine* lines)
-{
-    int x = (blockIdx.x * blockDim.x) + threadIdx.x;
-    int y = (blockIdx.y * blockDim.y) + threadIdx.y;
-
-    if (x >= resolution.x || y >= resolution.y) return;
-
-    const int width = resolution.x;
-    const int height = resolution.y;
-    const int index = x + y * width;
-
-    float       rAcc = 0.0f;
-    glm::vec3   cAcc = glm::vec3(0.0f);
-    float       wAcc = 0.0f;
-
-#pragma unroll
-    for (int dy = -1; dy <= 1; ++dy) {
-#pragma unroll
-        for (int dx = -1; dx <= 1; ++dx) {
-            int nx = x + dx;
-            int ny = y + dy;
-            if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
-                float w = G3x3[(dy + 1) * 3 + (dx + 1)];
-                const RenderLine& s = lines[nx + ny * width];
-                rAcc += w * s.alpha;
-                cAcc += w * s.color;
-                wAcc += w;
-            }
-        }
-    }
-
-    float invW = (wAcc > 0.0f) ? (1.0f / wAcc) : 0.0f;
-    lines[index].alpha = rAcc * invW;
-    lines[index].color = cAcc * invW;
-}
-
 inline __host__ __device__ bool worldToPixel(
     const Camera& cam,
     const glm::vec3& P,
@@ -435,7 +393,7 @@ inline __host__ __device__ bool worldToPixel(
     const float px = x_img / cam.pixelLength.x + cx;
     const float py = y_img / cam.pixelLength.y + cy;
 
-    outPx = { glm::floor(px + 0.5f), glm::floor(py + 0.5f) };
+    outPx = { glm::floor(px), glm::floor(py) };
 
     return (px >= -0.5f && px <= cam.resolution.x - 0.5f &&
         py >= -0.5f && py <= cam.resolution.y - 0.5f);
@@ -550,10 +508,12 @@ __global__ void computeIntersections(
     RenderLine* lines,
     char* mattypes,
     ShadeableIntersection* intersections,
-    int* pathIndices)
+    int* pathIndices,
+    float approxlineDistance)
 #else
 __global__ void computeIntersections(
     Camera cam,
+    int iter,
     int depth,
     int num_paths,
     PathSegment* pathSegments,
@@ -564,127 +524,96 @@ __global__ void computeIntersections(
     int lightgeoms_size,
     glm::vec3* vertexPos,
     glm::vec3* vertexNor,
-    glm::vec2* vertexUV,
+    glm::vec4* vertexUV,
     char* vertexSchannel,
     Material* materials,
     RenderLine* lines,
-    ShadeableIntersection* intersections)
+    ShadeableIntersection* intersections,
+    float approxlineDistance)
 #endif // PT_MATERIAL_SORT
 {
     int path_index = blockIdx.x * blockDim.x + threadIdx.x;
 
-    if (path_index < num_paths)
-    {
+    if (path_index >= num_paths)
+        return;
+
+    thrust::default_random_engine rng = makeSeededRandomEngine(iter, path_index, depth);
+    thrust::uniform_real_distribution<float> u01(0, 1);
+
 #if PT_MATERIAL_SORT
 #if PT_RUSSIAN_ROULETTE
-        // compute rr prob eariler
-        glm::vec3 throughput = pathSegments[path_index].throughput;
-        float q = fminf(fmaxf(throughput.r, fmaxf(throughput.g, throughput.b)) + 0.001f, 0.95f);
-        thrust::default_random_engine rng = makeSeededRandomEngine(iter, path_index, depth);
-        thrust::uniform_real_distribution<float> u01(0, 1);
-        float rand = u01(rng);
+    // compute rr prob eariler
+    glm::vec3 throughput = pathSegments[path_index].throughput;
+    float q = fminf(fmaxf(throughput.r, fmaxf(throughput.g, throughput.b)) + 0.001f, 0.95f);
+
+    float rand = u01(rng);
 #endif // PT_RUSSIAN_ROULETTE
 #endif // PT_MATERIAL_SORT
 
-        Ray ray = pathSegments[path_index].ray;
-        ShadeableIntersection isect;
-        bool hit;
-        if (pathSegments[path_index].remainingBounces <= 0) {
-            hit = false;
-        }
-        else {
-            hit = getClosestHit(ray, pathSegments[path_index].schannel, depth, bvhNodes, geoms, geoms_size, lightgeoms, lightgeoms_size, vertexPos, vertexNor, vertexUV, vertexSchannel, materials, isect);
-        }
+    Ray ray = pathSegments[path_index].ray;
+    ShadeableIntersection isect;
+    bool hit;
+    if (pathSegments[path_index].remainingBounces <= 0) {
+        hit = false;
+    }
+    else {
+        hit = getClosestHit(ray, pathSegments[path_index].schannel, depth, bvhNodes, geoms, geoms_size, lightgeoms, lightgeoms_size, vertexPos, vertexNor, vertexUV, vertexSchannel, materials, isect);
+    }
 
+    char mattype = NONE_MAT;
+
+#if PT_LINE_RENDER
+    // modify isect by checking line intersection
+    float searchdistance = hit ? isect.t : 1000000.f;
+    searchdistance = glm::clamp(searchdistance, 1.f, approxlineDistance);
+    glm::ivec2 pixel;
+    glm::vec3 isectP = ray.origin + searchdistance * ray.direction;
+    if (worldToPixel(cam, isectP, pixel)) {
+        int pixelIdx = pixel.x + (pixel.y * cam.resolution.x);
+        float lineAlpha = lines[pixelIdx].alpha;
+        //lineAlpha = glm::smoothstep(0.1f, 0.6f, lineAlpha);
+        if (u01(rng) < lineAlpha) {
+            hit = true;
+            isect.t = searchdistance;
+            isect.materialId = -2;
+            isect.lightEmission = lines[pixelIdx].color;
+            mattype = LINES;
+        }
+    }
+#endif // PT_LINE_RENDER
+
+    if (!hit)
+    {
+        intersections[path_index].t = -1.0f;
+        mattype = NONE_MAT;
+    }
+    else
+    {
+        intersections[path_index] = isect;
 #if PT_MATERIAL_SORT
-        if (!hit)
+        if (mattype != LINES) 
         {
-            intersections[path_index].t = -1.0f;
-            char mattype = NONE_MAT;
-#if PT_LINE_RENDER
-            glm::ivec2 pixel;
-            glm::vec3 isectP = ray.origin + 1000000.f * ray.direction;
-            if (worldToPixel(cam, isectP, pixel)) {
-                int pixelIdx = pixel.x + (pixel.y * cam.resolution.x);
-                float lineAlpha = lines[pixelIdx].alpha;
-                //lineAlpha = glm::smoothstep(0.1f, 0.6f, lineAlpha);
-                if (u01(rng) < lineAlpha) {
-                    intersections[path_index].t = 1000000.f;
-                    intersections[path_index].materialId = -2;
-                    intersections[path_index].lightEmission = lines[pixelIdx].color;
-                    mattype = LINES;
-                }
+            if (isect.materialId < 0) {
+                mattype = LIGHT;
             }
-#endif // PT_LINE_RENDER
-            pathIndices[path_index] = PACKINDEX(path_index, mattype);
-        }
-        else
-        {
-#if PT_LINE_RENDER
-            // modify isect by checking line intersection
-            glm::ivec2 pixel;
-            glm::vec3 isectP = ray.origin + isect.t * ray.direction;
-            if (worldToPixel(cam, isectP, pixel)) {
-                int pixelIdx = pixel.x + (pixel.y * cam.resolution.x);
-                float lineAlpha = lines[pixelIdx].alpha;
-                //lineAlpha = glm::smoothstep(0.1f, 0.6f, lineAlpha);
-                if (u01(rng) < lineAlpha) {
-                    isect.materialId = -2 - isect.materialId;
-                    isect.lightEmission = lines[pixelIdx].color;
-                }
-            }
-#endif // PT_LINE_RENDER
-            // The ray hits something
-            intersections[path_index] = isect;
-            // write mat type, considering rr, paths to terminate will flag their mat type with TER_
-            char mattype = isect.materialId >= 0 ? mattypes[isect.materialId] : (isect.materialId == -1 ? LIGHT : LINES);
+            else 
+            {
+                mattype = mattypes[isect.materialId];
 #if PT_RUSSIAN_ROULETTE
-            constexpr char TER_OFFSET = DIFFUSE - TER_DIFFUSE;
-            if (rand > q && mattype != LIGHT && mattype != LINES) {
-                mattype += TER_OFFSET;
-            }
+                constexpr char TER_OFFSET = DIFFUSE - TER_DIFFUSE;
+                if (rand > q) 
+                {
+                    mattype += TER_OFFSET;
+                }
 #endif // PT_RUSSIAN_ROULETTE
-            pathIndices[path_index] = PACKINDEX(path_index, mattype);
-        }
-#else
-        if (!hit)
-        {
-            intersections[path_index].t = -1.0f;
-#if PT_LINE_RENDER
-            glm::ivec2 pixel;
-            glm::vec3 isectP = ray.origin + 1000000.f * ray.direction;
-            if (worldToPixel(cam, isectP, pixel)) {
-                int pixelIdx = pixel.x + (pixel.y * cam.resolution.x);
-                float lineAlpha = lines[pixelIdx].alpha;
-                //lineAlpha = glm::smoothstep(0.1f, 0.6f, lineAlpha);
-                if (u01(rng) < lineAlpha) {
-                    intersections[path_index].t = 1000000.f;
-                    intersections[path_index].materialId = -2;
-                    intersections[path_index].lightEmission = lines[pixelIdx].color;
-                }
             }
-#endif // PT_LINE_RENDER
         }
-        else
-        {
-            // The ray hits something
-#if PT_LINE_RENDER
-            glm::ivec2 pixel;
-            glm::vec3 isectP = ray.origin + isect.t * ray.direction;
-            if (worldToPixel(cam, isectP, pixel)) {
-                int pixelIdx = pixel.x + (pixel.y * cam.resolution.x);
-                float lineAlpha = lines[pixelIdx].alpha;
-                //lineAlpha = glm::smoothstep(0.1f, 0.6f, lineAlpha);
-                if (u01(rng) < lineAlpha) {
-                    isect.materialId = -2 - isect.materialId;
-                    isect.lightEmission = lines[pixelIdx].color;
-                }
-            }
-            intersections[path_index] = isect;
-        }
-#endif // PT_LINE_RENDER
 #endif // PT_MATERIAL_SORT
     }
+
+#if PT_MATERIAL_SORT
+    pathIndices[path_index] = PACKINDEX(path_index, mattype);
+#endif // PT_MATERIAL_SORT
 }
 
 
@@ -869,11 +798,13 @@ __global__ void shadeMaterial(
 #endif // PT_MATERIAL_SORT
 
     PathSegment segment = pathSegments[segmentIdx];
+
 #if PT_MATERIAL_SORT
 #if PT_RUSSIAN_ROULETTE
     float q = fminf(fmaxf(segment.throughput.r, fmaxf(segment.throughput.g, segment.throughput.b)) + 0.001f, 0.95f);
 #endif // PT_RUSSIAN_ROULETTE
 #endif // PT_MATERIAL_SORT
+
     if (segment.remainingBounces > 0) {
         ShadeableIntersection intersection = shadeableIntersections[segmentIdx];
         if (intersection.t > 0.0f) // if the intersection exists...
@@ -1043,11 +974,13 @@ void pathtrace(uchar4* pbo, int maxiter, int iter)
             dev_lines,
             dev_mattypes,
             dev_intersections,
-            dev_pathindices
+            dev_pathindices,
+            hst_scene->approxLineDist
             );
 #else
         computeIntersections << <numblocksPathSegmentTracing, blockSize1d >> > (
             cam,
+            iter,
             depth,
             num_paths,
             dev_paths,
@@ -1062,7 +995,8 @@ void pathtrace(uchar4* pbo, int maxiter, int iter)
             dev_vertSchannel,
             dev_materials,
             dev_lines,
-            dev_intersections
+            dev_intersections,
+            hst_scene->approxLineDist
             );
 #endif // PT_MATERIAL_SORT
         checkCUDAError("trace one bounce");
@@ -1202,7 +1136,6 @@ void pathtraceGetGBuffer()
         generateGBufferRayFromCamera << <blocksPerGrid2d, blockSize2d >> > (cam, dev_paths_A, offset);
         checkCUDAError("generate camera ray");
 
-        int depth = 0;
         PathSegment* dev_path_end = dev_paths_A + pixelcount;
         int num_paths = dev_path_end - dev_paths_A;
 

@@ -5,7 +5,7 @@
 #define PT_ERRORCHECK 1
 
 // material sort
-#define PT_MATERIAL_SORT 1
+#define PT_MATERIAL_SORT 0
 
 // russian roulette
 #define PT_RUSSIAN_ROULETTE 1
@@ -42,7 +42,7 @@
 #define PT_CEL_SHADING 1
 #define PT_SHADOW_CHANNEL 1
 #define PT_LINE_RENDER 1
-#define PT_LINE_SCALE 0.001
+#define PT_LINE_SCALE 0.0012
 #define PT_LINE_MAXWIDTH 0.05
 
 #endif

@@ -856,6 +856,7 @@ __host__ __device__ glm::vec3 Sample_Li(
         return Sample_Li_Rect(light, scatterPos, lightDir, lightNor, lightDist, pdf, rng);
     else if (light.type == DIRECTIONALLIGHT)
         return Sample_Li_Directional(light, scatterPos, lightDir, lightNor, lightDist, pdf, rng);
+    return glm::vec3(0.f);
 }
 
 

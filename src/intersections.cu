@@ -230,7 +230,16 @@ __host__ __device__ bool getAnyHit(
         if (geom.type == TRIANGLE)
         {
             vertIds = geom.vertIds;
-            distance = TriangleIntersect(vertexPos[vertIds[0]], vertexPos[vertIds[1]], vertexPos[vertIds[2]], r, barycentricParameters);
+            char triSchannel = glm::min(vertexSchannel[vertIds[0]], glm::min(vertexSchannel[vertIds[1]], vertexSchannel[vertIds[2]]));
+#if PT_SHADOW_CHANNEL
+            if (!ChannelCheck[curSchannel][triSchannel]) {
+                distance = INFINITY;
+            }
+            else
+#endif // PT_SHADOW_CHANNEL
+            {
+                distance = TriangleIntersect(vertexPos[vertIds[0]], vertexPos[vertIds[1]], vertexPos[vertIds[2]], r, barycentricParameters);
+            }
         }
         else if (geom.type == SPHERE)
         {
@@ -352,12 +361,14 @@ __host__ __device__ bool getClosestHit(
                 temp_vp0 = vertexPos[temp_vertIds[0]];
                 temp_vp1 = vertexPos[temp_vertIds[1]];
                 temp_vp2 = vertexPos[temp_vertIds[2]];
+                // vertex offset
                 if (normalOffset > 0.f) {
                     normalOffset = glm::min((float)PT_LINE_MAXWIDTH, normalOffset);
                     temp_vp0 += normalOffset * vertexNor[temp_vertIds[0]] * glm::length(temp_vp0 - r.origin);
                     temp_vp1 += normalOffset * vertexNor[temp_vertIds[1]] * glm::length(temp_vp1 - r.origin);
                     temp_vp2 += normalOffset * vertexNor[temp_vertIds[2]] * glm::length(temp_vp2 - r.origin);
                 }
+                // shadow channel
                 triSchannel = glm::min(vertexSchannel[temp_vertIds[0]], glm::min(vertexSchannel[temp_vertIds[1]], vertexSchannel[temp_vertIds[2]]));
 #if PT_SHADOW_CHANNEL
                 if (!ChannelCheck[curSchannel][triSchannel]) {
@@ -374,7 +385,7 @@ __host__ __device__ bool getClosestHit(
                 temp_center = geom.center;
                 distance = SphereIntersect(geom.radius + glm::min((float)PT_LINE_MAXWIDTH, normalOffset) * glm::length(temp_center - r.origin), temp_center, r);
             }
-
+            // Culling
             bool cull = false;
             if (culling != PTCullingOptions::CULLNONE) {
                 glm::vec3 tempnormal;
@@ -391,7 +402,6 @@ __host__ __device__ bool getClosestHit(
                     cull = glm::dot(-r.direction, tempnormal) < 0.f;
                 }
             }
-
             // Compute the minimum t from the intersection tests to determine what
             // scene geometry object was hit first.
             if (distance > 0.0f && distance < t &&!cull)
@@ -454,23 +464,57 @@ __host__ __device__ bool getClosestHit(
         glm::vec3 temp_bary;
         glm::ivec3 temp_vertIds;
         glm::vec3 temp_vp0, temp_vp1, temp_vp2, temp_center;
+        char triSchannel = 0;
         if (geom.type == TRIANGLE)
         {
             temp_vertIds = geom.vertIds;
             temp_vp0 = vertexPos[temp_vertIds[0]];
             temp_vp1 = vertexPos[temp_vertIds[1]];
             temp_vp2 = vertexPos[temp_vertIds[2]];
-            distance = TriangleIntersect(temp_vp0, temp_vp1, temp_vp2, r, temp_bary);
+            // vertex offset
+            if (normalOffset > 0.f) {
+                normalOffset = glm::min((float)PT_LINE_MAXWIDTH, normalOffset);
+                temp_vp0 += normalOffset * vertexNor[temp_vertIds[0]] * glm::length(temp_vp0 - r.origin);
+                temp_vp1 += normalOffset * vertexNor[temp_vertIds[1]] * glm::length(temp_vp1 - r.origin);
+                temp_vp2 += normalOffset * vertexNor[temp_vertIds[2]] * glm::length(temp_vp2 - r.origin);
+            }
+            // shadow channel
+            triSchannel = glm::min(vertexSchannel[temp_vertIds[0]], glm::min(vertexSchannel[temp_vertIds[1]], vertexSchannel[temp_vertIds[2]]));
+#if PT_SHADOW_CHANNEL
+            if (!ChannelCheck[curSchannel][triSchannel]) {
+                distance = INFINITY;
+            }
+            else
+#endif // PT_SHADOW_CHANNEL
+            {
+                distance = TriangleIntersect(temp_vp0, temp_vp1, temp_vp2, r, temp_bary);
+            }
         }
         else if (geom.type == SPHERE)
         {
             temp_center = geom.center;
-            distance = SphereIntersect(geom.radius, temp_center, r);
+            distance = SphereIntersect(geom.radius + glm::min((float)PT_LINE_MAXWIDTH, normalOffset) * glm::length(temp_center - r.origin), temp_center, r);
         }
-
+        // Culling
+        bool cull = false;
+        if (culling != PTCullingOptions::CULLNONE) {
+            glm::vec3 tempnormal;
+            if (geom.type == TRIANGLE) {
+                tempnormal = glm::normalize(vertexNor[temp_vertIds[0]] * temp_bary.x + vertexNor[temp_vertIds[1]] * temp_bary.y + vertexNor[temp_vertIds[2]] * temp_bary.z);
+            }
+            else if (geom.type == SPHERE) {
+                tempnormal = glm::normalize(r.origin + distance * r.direction - temp_center);
+            }
+            if (culling == PTCullingOptions::CULLFRONT) {
+                cull = glm::dot(-r.direction, tempnormal) > 0.f;
+            }
+            else if (culling == PTCullingOptions::CULLBACK) {
+                cull = glm::dot(-r.direction, tempnormal) < 0.f;
+            }
+        }
         // Compute the minimum t from the intersection tests to determine what
         // scene geometry object was hit first.
-        if (distance > 0.0f && distance < t)
+        if (distance > 0.0f && distance < t && !cull)
         {
             t = distance;
             hit_geom_index = i;
@@ -483,6 +527,7 @@ __host__ __device__ bool getClosestHit(
             vp1 = temp_vp1;
             vp2 = temp_vp2;
             center = temp_center;
+            hitSchannel = triSchannel;
         }
     }
 #endif // PT_USEBVH

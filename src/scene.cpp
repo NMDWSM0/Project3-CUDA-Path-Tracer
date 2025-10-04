@@ -50,19 +50,19 @@ Scene::Scene(string filename)
     }
 }
 
-static struct MeshInstance {
+struct MeshInstance {
     int node = -1;
     int mesh = -1;
     glm::mat4 world{ 1.0f };
 };
 
-static struct CameraInstance {
+struct CameraInstance {
     int node = -1;
     int camera = -1;
     glm::mat4 world{ 1.0f };
 };
 
-static struct LightInstance {
+struct LightInstance {
     int node = -1;
     int light = -1;
     glm::mat4 world{ 1.0f };
@@ -964,13 +964,15 @@ void Scene::loadFromJSON(const std::string& jsonName)
     }
     bvhAccel = CreateBVHAccelerator(primitives, 1);
 #if PT_LINE_RENDER
+    float avgLineDistance = 0.f;
     std::vector<std::shared_ptr<Primitive>> extend_primitives;
     for (int i = 0; i < geoms.size(); ++i) {
         const Geom& geom = geoms[i];
         // only put line rendering stuff into extend BVH
         if (geom.materialid >= 0 && materials[geom.materialid].linecolor.x >= 0.f) {
             if (geom.type == SPHERE) {
-                primitives.push_back(std::make_shared<Primitive>(i, geom.center, geom.radius + PT_LINE_MAXWIDTH));
+                extend_primitives.push_back(std::make_shared<Primitive>(i, geom.center, geom.radius + PT_LINE_MAXWIDTH));
+                avgLineDistance += glm::length(geom.center - camera.position);
             }
             else {
                 Bounds3f oriBound(vertPos[geom.vertIds[0]], vertPos[geom.vertIds[1]]);
@@ -978,11 +980,16 @@ void Scene::loadFromJSON(const std::string& jsonName)
                 Bounds3f extendBound(vertPos[geom.vertIds[0]] + (float)PT_LINE_MAXWIDTH * vertNor[geom.vertIds[0]],
                     vertPos[geom.vertIds[1]] + (float)PT_LINE_MAXWIDTH * vertNor[geom.vertIds[1]]);
                 extendBound = Union(extendBound, vertPos[geom.vertIds[2]] + (float)PT_LINE_MAXWIDTH * vertNor[geom.vertIds[2]]);
-                primitives.push_back(std::make_shared<Primitive>(i, Union(oriBound, extendBound)));
+                extend_primitives.push_back(std::make_shared<Primitive>(i, Union(oriBound, extendBound)));
+                avgLineDistance += glm::length(oriBound.Center() - camera.position);
             }
         }
     }
-    extend_bvhAccel = CreateBVHAccelerator(primitives, 1);
+    if (extend_primitives.size() > 0) {
+        avgLineDistance /= extend_primitives.size();
+    }
+    extend_bvhAccel = CreateBVHAccelerator(extend_primitives, 1);
+    approxLineDist = avgLineDistance + 0.5f;
 #endif // PT_LINE_RENDER
     // Env Map
     if (data.contains("EnvMap")) {

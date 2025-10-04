@@ -122,28 +122,6 @@ struct Material
     int transmissionmapTexId = -1;
     int transmissionmapTexUV = 0;
     bool toonshading = false;
-
-    //__host__ __device__ Material() : 
-    //    type(DIFFUSE), 
-    //    color(1.f), 
-    //    normalStrength(1.f), 
-    //    baseColorTexId(-1), 
-    //    metallicRoughnessTexId(-1), 
-    //    normalmapTexId(-1), 
-    //    emissionmapTexId(-1), 
-    //    transmissionmapTexId(-1)
-    //{};
-
-    //__host__ __device__ Material(const Material& other) {
-    //    std::memcpy(this, &other, sizeof(Material));
-    //}
-
-    //__host__ __device__ Material& operator=(const Material& other) {
-    //    if (this != &other) {
-    //        std::memcpy(this, &other, sizeof(Material));
-    //    }
-    //    return *this;
-    //}
 };
 
 struct RenderLine
