@@ -4,13 +4,13 @@
         "RES": [1920, 1080],
         "FOVY": 70.0,
         "ITERATIONS": 5000,
-        "DEPTH": 10,
+        "DEPTH": 20,
         "FILE": "FlowerOcean",
         "EYE": [28.0, 5.2, 42.6],
         "LOOKAT": [0.0, 5.0, 0.0],
         "UP": [0.0, 1.0, 0.0],
         "FOCALDISTANCE": 15.357,
-        "LENRADIUS": 0.015
+        "LENRADIUS": 0.016
     },
     "EnvMap": {
         "PATH": "./FlowerOcean.hdr"
@@ -26,11 +26,12 @@
     ],
     "Postprocess": {
         "VIEWTRANSFORM": "ACES",
-        "EXPOSURE": -0.4,
-        "TEMPERATURE": 0.5,
-        "TINT": -0.7,
-        "SATURATION": 0,
-        "VIBRANCE": 0.2,
-        "CONTRAST": 0.1
+        "EXPOSURE": -0.05,
+        "TEMPERATURE": 0.2,
+        "TINT": -0.4,
+        "SATURATION": 0.05,
+        "VIBRANCE": 0.15,
+        "CONTRAST": 0.02,
+        "CONTRAST_PIVOT": 0.4
     }
 }

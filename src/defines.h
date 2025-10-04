@@ -5,7 +5,7 @@
 #define PT_ERRORCHECK 1
 
 // material sort
-#define PT_MATERIAL_SORT 0
+#define PT_MATERIAL_SORT 1
 
 // russian roulette
 #define PT_RUSSIAN_ROULETTE 1

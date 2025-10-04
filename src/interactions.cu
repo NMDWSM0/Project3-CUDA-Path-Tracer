@@ -927,6 +927,7 @@ __device__ void getMatParams(
 {
     // if no textures
     if (!textureHandles) {
+        mat.emission = srgbToLinear(mat.emission);
         mat.emission *= mat.emissionStrength;
         return;
     }
