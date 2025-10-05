@@ -1,6 +1,6 @@
 # CUDA Path Tracer
 
-![](saved_imgs/Sea_of_Flowers_1080p.png)
+![](saved_imgs/Sea_of_Flowers_4k.png)
 
 **University of Pennsylvania, CIS 565: GPU Programming and Architecture, Project 3**
 
