@@ -1,6 +1,7 @@
 # CUDA Path Tracer
 
-![](saved_imgs/Sea_of_Flowers_4k.png)
+![](saved_imgs/Sea_of_Flowers_4k.png)  
+_The Sea of Flowers in Memory_
 
 **University of Pennsylvania, CIS 565: GPU Programming and Architecture, Project 3**
 
@@ -8,10 +9,106 @@
     -   [LinkedIn](https://www.linkedin.com/in/yu-jiang-450815328/)
 -   Tested on: Windows 11, Ultra 7 155H @ 3.80 GHz, 32GB RAM, RTX 4060 8192MB (Personal Laptop)
 
-### (TODO: Your README)
+## Summary
 
-_DO NOT_ leave the README to the last minute! It is a crucial part of the
-project, and we will not be able to grade you without a good README.
+-   [Final Scene Project Overview](#final-scene-project-overview)
+-   [Features](#features)
+    -   [Ray Compaction](#ray-compaction)
+    -   [Material Sort](#material-sort)
+    -   [Ruaaian Roulette](#russian-roulette)
+    -   [Anti-Aliasing](#anti-aliasing)
+    -   [Perfect Specular & Refractive Material](#perfect-specular--refractive-material)
+    -   [Disney BSDF](#disney-bsdf)
+    -   [Texture & Normal Mapping with Arbitrary Mesh Loading](#texture-mapping--normal-mapping)
+    -   [Multiple Importance Sampling](#multiple-importance-sampling)
+    -   [Physically based Depth of Field](#depth-of-field)
+    -   [Post-Processing](#post-processing)
+    -   [Environment Mapping](#environmen-mapping)
+    -   [Bounding Volume Hierarchies with SAH Optimization](#bounding-volume-hierarchies)
+    -   [Open Image AI Denoiser](#open-image-ai-denoiser)
+    -   [Stylized Rendering](#stylized-rendering---cel-shading)
+        -   [Cel-Shading](#stylized-rendering---cel-shading)
+        -   [Shadow Channel](#stylized-rendering---shadow-channel)
+        -   [Line Rendering](#stylized-rendering---line-rendering)
+-   [Compilation Changes](#compilation-changes)
+-   [Bloopers](#bloopers)
+-   [References](#references)
+
+## Final Scene Project Overview
+
+Tell where each part of the scene comes from, show the blender scene file, show the gbuffer
+
+## Features
+
+### Ray Compaction
+
+#### Implementation
+
+Implementation
+
+#### Performance
+
+Performance
+
+### Material Sort
+
+Implementation + Performance
+
+### Russian Roulette
+
+Implementation + Performance (Closed + Open)
+
+### Anti-Aliasing
+
+Implementation + Images comparison
+
+### Perfect Specular & Refractive Material
+
+Implementation + Images comparison
+
+### Disney BSDF
+
+Implementation + Images comparison
+
+### Texture Mapping & Normal Mapping
+
+Implementation + Images comparison
+
+### Multiple Importance Sampling
+
+Implementation + Performance + Images comparison
+
+### Depth of Field
+
+Implementation + Images comparison
+
+### Post Processing
+
+Implementation + Images comparison
+
+### Environmen Mapping
+
+Implementation + Images comparison
+
+### Bounding Volume Hierarchies
+
+Implementation + Performance
+
+### Open Image AI Denoiser
+
+Implementation + Performance + Images comparison
+
+### Stylized Rendering - Cel-Shading
+
+Implementation + Images comparison
+
+### Stylized Rendering - Shadow Channel
+
+Implementation + Images comparison
+
+### Stylized Rendering - Line Rendering
+
+Implementation + Images comparison
 
 ## Compilation Changes
 
@@ -54,4 +151,4 @@ A "sharp" sphere. That's because the barycentric coordinates is computed wrong (
 Please note that following websites are not accessible outside China, so you may need a VPN to read them.
 
 -   [HSR] Castorice, official model by miHoYo. https://www.aplaybox.com/details/model/Eb6vXivegiZM
--   The Flower Sea in Memory, created by Wis. https://www.aplaybox.com/details/model/TBXa17wZuBZY
+-   The Sea of Flowers in Memory, created by Wis. https://www.aplaybox.com/details/model/TBXa17wZuBZY
