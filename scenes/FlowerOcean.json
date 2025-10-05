@@ -1,7 +1,7 @@
 {
     "Materials": {},
     "Camera": {
-        "RES": [1920, 1080],
+        "RES": [3840, 2160],
         "FOVY": 70.0,
         "ITERATIONS": 5000,
         "DEPTH": 20,

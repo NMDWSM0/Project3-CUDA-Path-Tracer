@@ -993,7 +993,7 @@ void Scene::loadFromJSON(const std::string& jsonName)
         avgLineDistance /= extend_primitives.size();
     }
     extend_bvhAccel = CreateBVHAccelerator(extend_primitives, 1);
-    approxLineDist = avgLineDistance + 0.5f;
+    approxLineDist = avgLineDistance * 1.4f + 0.5f;
 #endif // PT_LINE_RENDER
     // Env Map
     if (data.contains("EnvMap")) {
