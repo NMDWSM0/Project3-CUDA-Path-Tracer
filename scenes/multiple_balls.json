@@ -1,0 +1,48 @@
+{
+    "Materials": {
+        "diffuse_white": {
+            "TYPE": "Diffuse",
+            "RGB": [0.98, 0.98, 0.98]
+        }
+    },
+    "Camera": {
+        "RES": [2048, 2048],
+        "FOVY": 20.0,
+        "ITERATIONS": 5000,
+        "DEPTH": 10,
+        "FILE": "envmap_UEmatball",
+        "EYE": [0.0, 45.0, 45],
+        "LOOKAT": [0.0, 5.0, 5.0],
+        "UP": [0.0, 1.0, 0.0],
+        "FOCALDISTANCE": 16,
+        "LENRADIUS": 0.0
+    },
+    "EnvMap": {
+        "PATH": "./14-Hamarikyu_Bridge_B_3k.hdr"
+    },
+    "Objects": [
+        {
+            "TYPE": "cube",
+            "MATERIAL": "diffuse_white",
+            "POSITION": [0.0, 0.0, 0.0],
+            "SIZE": [40.0, 0.01, 40.0]
+        },
+        {
+            "TYPE": "gltf",
+            "PATH": "./MultipleBalls.glb",
+            "SCALE": [1.0, 1.0, 1.0]
+        }
+    ],
+    "Postprocess": {
+        "VIEWTRANSFORM": "ACES",
+        "EXPOSURE": 0,
+        "TEMPERATURE": 0,
+        "TINT": 0,
+        "SATURATION": 0,
+        "VIBRANCE": 0.0,
+        "CONTRAST": 0.0,
+        "CDLSLOPE": [1.0, 1.0, 1.0],
+        "CDLOFFSET": [0.0, 0.0, 0.0],
+        "CDLPOWER": [1.0, 1.0, 1.0]
+    }
+}

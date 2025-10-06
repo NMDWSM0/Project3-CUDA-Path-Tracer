@@ -20,8 +20,8 @@
         },
         "disney_white": {
             "TYPE": "Disney",
-            "RGB": [0.98, 0.98, 0.98],
-            "ROUGHNESS": 0.01,
+            "RGB": [1.0, 1.0, 1.0],
+            "ROUGHNESS": 0.001,
             "METALLIC": 0.0,
             "TRANSMISSION": 0.0,
             "IOR": 1.5,
@@ -40,7 +40,7 @@
         "LOOKAT": [0.0, 5.0, 0.0],
         "UP": [0.0, 1.0, 0.0],
         "FOCALDISTANCE": 16,
-        "LENRADIUS": 0.0
+        "LENRADIUS": 0.5
     },
     "Lights": [
         {
@@ -85,7 +85,8 @@
         {
             "TYPE": "gltf",
             "PATH": "./UEMatBall.glb",
-            "SCALE": [2.0, 2.0, 2.0]
+            "SCALE": [2.0, 2.0, 2.0],
+            "ROTAT": [0.0, 0.0, 0.0]
         }
     ],
     "Postprocess": {

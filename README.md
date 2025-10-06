@@ -14,11 +14,11 @@ _The Sea of Flowers in Memory_
 -   [Final Scene Project Overview](#final-scene-project-overview)
 -   [Visual Features](#visual-features)
     -   [Anti-Aliasing](#anti-aliasing)
-    -   [Perfect Specular & Refractive Material](#perfect-specular--refractive-material)
+    -   [Perfect Specular Reflective & Refractive Material](#perfect-specular-reflective--refractive-material)
     -   [Disney BSDF](#disney-bsdf)
     -   [Texture & Normal Mapping with Arbitrary Mesh Loading](#texture-mapping--normal-mapping)
     -   [Multiple Importance Sampling](#multiple-importance-sampling)
-    -   [Physically based Depth of Field](#depth-of-field)
+    -   [Depth of Field with Auto Focus](#depth-of-field)
     -   [Post-Processing](#post-processing)
     -   [Environment Mapping](#environmen-mapping)
     -   [Open Image AI Denoiser](#open-image-ai-denoiser)
@@ -56,75 +56,127 @@ Here are the results of using anti-aliasing and not useing it, I also include tw
 |    ![](saved_imgs/cornell_UEmatball_AA.png)     |    ![](saved_imgs/cornell_UEmatball_noAA.png)     |
 | ![](saved_imgs/cornell_UEmatball_AA_detail.png) | ![](saved_imgs/cornell_UEmatball_noAA_detail.png) |
 
-### Perfect Specular & Refractive Material
+### Perfect Specular Reflective & Refractive Material
 
 #### Implementation
 
-Implementation
+For the perfect specular reflective material, this is quite simple, just use glm::reflect to reflect the ray, and times the throughput with material's color.
+
+For the perfect specular refractive material, that's a little bit more complex then reflect, since you have to make it clear what's the ray's direction, to the point or out the point (**BE CAREFUL when using glm::refract**) ? and what's the eta, ior or 1/ior? That will cost a lot of time to debug, especially when the ray sphere intersection code suffers from floating point error, that makes you don't know whether the refractive part is wrong or the ray epsilon is too small.
 
 #### Results
 
-Results
+Here we show two images of Perfect Specular Reflective and Perfect Refractive materials，with different ior.
+
+|               Reflective               |       Refractive ior = 1.5        |         Refractive ior = 1.33          |
+| :------------------------------------: | :-------------------------------: | :------------------------------------: |
+| ![](saved_imgs/cornell_reflective.png) | ![](saved_imgs/cornell_glass.png) | ![](saved_imgs/cornell_glass_1.33.png) |
 
 ### Disney BSDF
 
-#### Implementation
+#### Implementation(not completely)
 
-Implementation
+For the Disney BSDF, it's a mixtures of multiple lobes, diffuse, dielectric refelction, metallic refelction, glass, and clearcoat. So to sample multiple different lobes, we have to randomly choose one and use it to evaluate the BSDF. For the evaluation part, we need to evaluate the contribute with each type of lobe using the current direction.
+
+The Diffuse part of Disney BSDF has the most different with common PBR materials, because it is not using a lambert diffusion, instead use a model taken into account retro-reflection and fake subsurface scattering.
+
+For dielectric, metal and glass parts, things are similar to common PBR materials because they are all using microfacet model and GGX (GTR2 is GGX) normal distribution function. Note that complete Disney BSDF contains anisotropic and sheen parameters, which are not implemented here due to time limit.
+
+For clearcoat part, it is a completely different lobe, similar to dieletric but uses GTR1 normal distribution function to create a longer tail.
 
 #### Results
 
-Results
+I build the scene with a environment map and 25 different UE material balls, they all have a pure reflective inner layer, and the outer layer is using different parameters of Disney BSDF. From the bottom row to top row, we are comparing Roughness, Metallic, Transmission, Clearcoat and Subsurface. In each row those values goes from 0 to 1.
+
+![](saved_imgs/multiple_UEmatballs_2048p.png)
 
 ### Texture Mapping & Normal Mapping
 
 #### Implementation
 
-Implementation
+To implement this, we have to first create a new data structure, Texture. A texture on the CPU is easy to load, just use stb_image or tiny_gltf loading, then you can copy the data to the array you want to use. But for CUDA, we have to send the texture to GPU, which is more complex than OpenGL which can also send textures to GPU side.
+
+We have to firstly have to use `cudaMallocArray` (or `cudaMallocMipmappedArray` for mipmap textures). Then to create a cuda texture, should call `cudaCreateTextureObject` function with two resource description parameter, `cudaResourceDesc` and `cudaTextureDesc`, these steps are more like those steps in OpenGL texture creating.
+
+But for mipmap textures, CUDA will not generate mipmaps for you automatically like OpenGL does, so we have to write a kernel to downsample the texture ourselves, and `cudaMemcpy` those data to the right address manually. That's very inconvenient I think.
+
+Finally to use textures on the GPU, we need the handle `cudaCreateTextureObject` returned to us, we can saved this in another array and copy to GPU side when `pathTraceInit`.
+
+Another important part to implement texture mapping and normal mapping is the texture coordinates. In my implementation, I read two set of texcoords for each glTF model, since some models choose to use different UVs to sample different textures. And after the intersection, we use the barycentric parameters to interpolate the texcoords, just like how we interpolate normals. For normal mapping, we still have to compute tangents in order to create the TBN space to map tangent space normal stored in normal texture into world space.
+
+In my final implementation, Color, Metallic, Roughness, Normal, Emission and Transmission supports texture/normal maps.
 
 #### Results
 
-Results
+Results? see the header image, that could not be rendered without texture maps.
 
 ### Multiple Importance Sampling
 
 #### Implementation
 
-Implementation
+To implement this, I firstly change the structure of lights: lights are no longer mixed with meshes, also for the material of light, they are completely another kind of objects in the scene. After that, in the shading stage, instead of only checking whether this ray hit the light, we find lights in the scene and compute its contribution actively, and a shadow ray is casted to check whether the point can receive the energy from that light.
+
+After completing that, we are not completely set with MIS, since we only check the contribution of lights now. some materials like perfect specular materials and materials with very small roughness is hard or even unable to sample by light. So we have to combine sampling the BSDF (that's what we did originally) and sampling the light. The amount of those two types of contribution are evaluated by their pdf, since a large pdf means it is more likely that this sampling method will give us a better result than another. So we use power heuristic here to compute the portion of two types of sampling results and add both. In that case our renderer can handle different types materials.
 
 #### Results
 
-Results
+MIS can create better images with same samples, or create image of same quality with less samples. At here we can compare the results of enabling and diabling the MIS with all 500 samples.
 
-### Depth of Field
+|                       With MIS                       |                        W/O MIS                         |
+| :--------------------------------------------------: | :----------------------------------------------------: |
+| ![](saved_imgs/cornell_UEmatball_MIS_500samples.png) | ![](saved_imgs/cornell_UEmatball_NOMIS_500samples.png) |
+
+And there's also a very classic scene to show the function of MIS: veach scene. So we also include that:
+
+|                 With MIS                 |                  W/O MIS                   |
+| :--------------------------------------: | :----------------------------------------: |
+| ![](saved_imgs/veach_MIS_500samples.png) | ![](saved_imgs/veach_noMIS_500samples.png) |
+
+### Depth of Field with Auto Focus
 
 #### Implementation
 
-Implementation
+To create physically based DoF, we have to add two parameters to the camera, focal distance and len's radius. Focal Distance is determing where's the clear plane, all the objects on the plane will be clear and all objects away from that plane will be blurer. Len's radius is controlling the strength of blur, a bigger len radius means light can comes from a larger range of angles, so the image will be blurer.
+
+In my implementation, we first check the clear point of each ray on the clear plane, and then randomly sample a point on the len, finally use that ray as the final ray we shoot to the scene.
+
+I also support Auto Focus, you can left-shift and click the scene, at the focal distance will be set to the surface you click. That's implemented by reading back the GBuffer of world position (or linear depth) and computing the focal distance.
 
 #### Results
 
-Results
+Here are the results of enabling and Disabling DoF.
+
+|                 With DoF                  |                      W/O DoF                      |
+| :---------------------------------------: | :-----------------------------------------------: |
+| ![](saved_imgs/cornell_UEmatball_DoF.png) | ![](saved_imgs/cornell_UEmatball_AA_denoised.png) |
 
 ### Post Processing
 
 #### Implementation
 
-Implementation
+In my implementation, I include several types of post processing, they are View Transform (also called tone curve), White Balance (controlled by two params: temperature and tint), Saturation, Vibrance (this will only increase the saturation with low saturation part of the image), and Contrast. all post processing are in the linear space before mapping them to sRGB values.
 
 #### Results
 
-Results
+Here are some results of some post processing examples, we can see obvious changes on images.
+
+|                   No Curve                    |                    ACES Curve                     |                Reinhard-L Curve                |
+| :-------------------------------------------: | :-----------------------------------------------: | :--------------------------------------------: |
+| ![](saved_imgs/cornell_UEmatball_NoCurve.png) | ![](saved_imgs/cornell_UEmatball_AA_denoised.png) | ![](saved_imgs/cornell_UEmatball_ReihardL.png) |
 
 ### Environmen Mapping
 
 #### Implementation
 
-Implementation
+For environment mapping, we load .hdr files and send it to GPU also using CUDA textures introduced above. To use the environment map is easy, at here I only replace the color when hit nothing with the color sampled from environment map.
 
 #### Results
 
-Results
+// imgs
+
+#### Possible Future Work
+
+Can try to treat the environment map as a light source, and importance sampling it. Easily we can apply cosine weighted sampling, and more advanced we can precompute the energy of each part of the environment map and importance sample it by that.
 
 ### Open Image AI Denoiser
 
@@ -277,7 +329,7 @@ A "sharp" sphere. That's because the barycentric coordinates is computed wrong (
 ### Tutorials
 
 -   Bounding Volume Hierarchies, https://www.pbr-book.org/4ed/Primitives_and_Intersection_Acceleration/Bounding_Volume_Hierarchies
--   Disney BSDF, https://schuttejoe.github.io/post/disneybsdf/
+-   Disney BSDF, https://schuttejoe.github.io/post/disneybsdf/, https://cseweb.ucsd.edu/~tzli/cse272/wi2023/homework1.pdf
 -   CUDA Textures, https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TEXTURE__OBJECT.html
 -   ACES Curve, https://knarkowicz.wordpress.com/2016/01/06/aces-filmic-tone-mapping-curve/
 -   Back-facing Line Render, https://x-wflo.github.io/2021/08/06/Cel-shading3/
