@@ -10,13 +10,20 @@
         "FOVY": 50.0,
         "ITERATIONS": 5000,
         "DEPTH": 10,
-        "FILE": "envmap_UEmatball",
-        "EYE": [0.0, 5.0, 16],
+        "FILE": "Castorice",
+        "EYE": [-4.4, 7.0, 5.5],
         "LOOKAT": [0.0, 5.0, 0.0],
         "UP": [0.0, 1.0, 0.0],
         "FOCALDISTANCE": 16,
         "LENRADIUS": 0.0
     },
+    "Lights": [
+        {
+            "TYPE": "directional",
+            "EMISSION": [1.0, 1.0, 1.0],
+            "POSITION": [-3, -3, -5]
+        }
+    ],
     "EnvMap": {
         "PATH": "./14-Hamarikyu_Bridge_B_3k.hdr"
     },
@@ -29,8 +36,9 @@
         },
         {
             "TYPE": "gltf",
-            "PATH": "./UEMatBall.glb",
-            "SCALE": [2.0, 2.0, 2.0]
+            "PATH": "./Castorice_Toon.glb",
+            "ROTAT": [0.0, 180.0, 0.0],
+            "SCALE": [5.0, 5.0, 5.0]
         }
     ],
     "Postprocess": {

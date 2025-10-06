@@ -92,6 +92,21 @@ __host__ __device__ float TriangleIntersect(glm::vec3 v0, glm::vec3 v1, glm::vec
     }
 }
 
+__host__ __device__ float SpherePdf(const LightGeom& light, glm::vec3 point) {
+    glm::vec3 center = light.position;
+    float radius = light.radius;
+    glm::vec3 centerToRef = glm::normalize(point - center);
+    float distCenter = glm::length(point - center);
+    // If inside the sphere
+    if (distCenter <= radius) {
+        return 0.f;
+    }
+    // Compute general sphere PDF
+    float sinThetaMax2 = (radius * radius) / (distCenter * distCenter);
+    float cosThetaMax = sqrt(glm::max(0.0f, 1.0f - sinThetaMax2));
+    return 1.f / (TWO_PI * (1 - cosThetaMax));
+}
+
 
 
 __host__ __device__ bool getAnyHit(
@@ -322,8 +337,7 @@ __host__ __device__ bool getClosestHit(
             if (distance < t && inAngle) {
                 t = distance;
                 glm::vec3 hitPoint = r.origin + t * r.direction;
-                float cosTheta = glm::dot(-r.direction, glm::normalize(hitPoint - position));
-                intersection.pdf_Li = (t * t) / (PI * radius * radius * cosTheta * 0.5);
+                intersection.pdf_Li = SpherePdf(light, r.origin);
                 intersection.lightEmission = light.emission * falloff;
                 intersection.materialId = -1;
             }

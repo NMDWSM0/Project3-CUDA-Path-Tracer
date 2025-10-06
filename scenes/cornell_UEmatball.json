@@ -33,14 +33,14 @@
     "Camera": {
         "RES": [800, 800],
         "FOVY": 50.0,
-        "ITERATIONS": 5000,
+        "ITERATIONS": 1000,
         "DEPTH": 10,
         "FILE": "cornell_UEmatball",
         "EYE": [0.0, 5.0, 16],
         "LOOKAT": [0.0, 5.0, 0.0],
         "UP": [0.0, 1.0, 0.0],
         "FOCALDISTANCE": 16,
-        "LENRADIUS": 0.5
+        "LENRADIUS": 0.0
     },
     "Lights": [
         {
@@ -91,10 +91,10 @@
     ],
     "Postprocess": {
         "VIEWTRANSFORM": "ACES",
-        "EXPOSURE": 0,
-        "TEMPERATURE": 0,
+        "EXPOSURE": 0.0,
+        "TEMPERATURE": 0.0,
         "TINT": 0,
-        "SATURATION": 0,
+        "SATURATION": 0.0,
         "VIBRANCE": 0.0,
         "CONTRAST": 0.0,
         "CDLSLOPE": [1.0, 1.0, 1.0],

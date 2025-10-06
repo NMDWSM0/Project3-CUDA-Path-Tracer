@@ -20,12 +20,13 @@ _The Sea of Flowers in Memory_
     -   [Multiple Importance Sampling](#multiple-importance-sampling)
     -   [Depth of Field with Auto Focus](#depth-of-field)
     -   [Post-Processing](#post-processing)
-    -   [Environment Mapping](#environmen-mapping)
+    -   [Environment Mapping](#environment-mapping)
     -   [Open Image AI Denoiser](#open-image-ai-denoiser)
     -   [Stylized Rendering](#stylized-rendering---cel-shading)
         -   [Cel-Shading](#stylized-rendering---cel-shading)
         -   [Shadow Channel](#stylized-rendering---shadow-channel)
         -   [Line Rendering](#stylized-rendering---line-rendering)
+        -   [Possible Future Work](#stylized-rendering---future-work)
 -   [Performance Features](#features)
     -   [Ray Compaction](#ray-compaction)
     -   [Material Sort](#material-sort)
@@ -37,7 +38,14 @@ _The Sea of Flowers in Memory_
 
 ## Final Scene Project Overview
 
-Tell where each part of the scene comes from, show the blender scene file, show the gbuffer
+_The Sea of Flowers in Memory_ is composed of two parts, the scene and the character. The character is _Castorice_ from _Honkai Star Rail_, downloaded at APlaybox from miHoYo official account. The scene is originally created by _Wis_ at APlaybox and then modified by myself to fit the project. All the relative things includes skining, poses, materials, textures, geometry nodes, and render settings. The scene project file and textures project are following:
+
+![](img/BlenderProject.png)  
+![](img/BlenderTextures.png)
+
+The scene used to render the header image is exported with this blender project, and the HDRI environment map is also rendered using this project in Blender.
+
+The Whole Scene includes 12,577,487 primitives, the header image is rendered at 3840\*2160 resolution, 20 max trace depth, 5000 iterations and used OIDN denoise. For performance, this scene is rendered at about 0.6-0.7 fps.
 
 ## Visual Features
 
@@ -132,6 +140,8 @@ And there's also a very classic scene to show the function of MIS: veach scene. 
 | :--------------------------------------: | :----------------------------------------: |
 | ![](saved_imgs/veach_MIS_500samples.png) | ![](saved_imgs/veach_noMIS_500samples.png) |
 
+We can see that BSDF importance sample (originally) is not good at handling rough surface with small lights. (And pure light sample is not good at handlING specular surface with large lights, I didn't implement a pure NEE integrator so no image for that). But MIS sample can handle all kinds of materials with all kinds of lights.
+
 ### Depth of Field with Auto Focus
 
 #### Implementation
@@ -158,13 +168,21 @@ In my implementation, I include several types of post processing, they are View 
 
 #### Results
 
-Here are some results of some post processing examples, we can see obvious changes on images.
+Here are the results of different View Transforms (Curves):
 
-|                   No Curve                    |                    ACES Curve                     |                Reinhard-L Curve                |
-| :-------------------------------------------: | :-----------------------------------------------: | :--------------------------------------------: |
-| ![](saved_imgs/cornell_UEmatball_NoCurve.png) | ![](saved_imgs/cornell_UEmatball_AA_denoised.png) | ![](saved_imgs/cornell_UEmatball_ReihardL.png) |
+|                   No Curve                    |                 ACES Curve                 |                Reinhard-L Curve                |
+| :-------------------------------------------: | :----------------------------------------: | :--------------------------------------------: |
+| ![](saved_imgs/cornell_UEmatball_NoCurve.png) | ![](saved_imgs/cornell_UEmatball_ACES.png) | ![](saved_imgs/cornell_UEmatball_ReihardL.png) |
 
-### Environmen Mapping
+We can see that image with no curve applied has _over exposed_ when the energy is greater than 1, since this does nothing to handle HDR colors to SDR and just clamp then from 0 to 1. Reinhard-L curve, just the opposite, make the scene too plain, that's because it's curve is just doing `c/(1+c)` which makes high-energy pixels almost be the same color. And ACES curve is keeping the image not _over exposed_ and keeping the high-energy pixels _light_ view at the same time.
+
+Here are some examples of different post-processing params with ACES curve:
+
+|                 Exposure -1.0                  |                 Temperature -1.0                  |                  Saturation 0.3                  |                  Contrast 0.3                  |
+| :--------------------------------------------: | :-----------------------------------------------: | :----------------------------------------------: | :--------------------------------------------: |
+| ![](saved_imgs/cornell_UEmatball_exposure.png) | ![](saved_imgs/cornell_UEmatball_temperature.png) | ![](saved_imgs/cornell_UEmatball_saturation.png) | ![](saved_imgs/cornell_UEmatball_contrast.png) |
+
+### Environment Mapping
 
 #### Implementation
 
@@ -172,7 +190,11 @@ For environment mapping, we load .hdr files and send it to GPU also using CUDA t
 
 #### Results
 
-// imgs
+|         With Environment Map         |          W/O Environment Map           |
+| :----------------------------------: | :------------------------------------: |
+| ![](saved_imgs/envmap_UEmatball.png) | ![](saved_imgs/noenvmap_UEmatball.png) |
+
+You asked me why there's a black picture? Of course because we have no lights nor env map!
 
 #### Possible Future Work
 
@@ -182,41 +204,75 @@ Can try to treat the environment map as a light source, and importance sampling 
 
 #### Implementation
 
-Implementation
+In my implementation, I create another buffer for denoised images to go, since I tried using only 1 buffer and re-write the denoised image to the buffer, which gives a really bad result. And I also use a `#if` to control whether enable realtime denoise or not, if so I will set the quailty to `OIDN_QUALITY_FAST` and denoise each frame, otherwise I set it to `OIDN_QUALITY_HIGH` and only denoise when the whole rendering process is finished.
 
 #### Results
 
-Results
+Images with denoise can use very less samples to get the visual effect of those with high samples, here are the results of images with 100/500 samples and with/without denoise.
+
+|             |                   With Denoise                    |                     W/O Denoise                     |
+| :---------: | :-----------------------------------------------: | :-------------------------------------------------: |
+| 100 samples | ![](saved_imgs/cornell_UEmatball_100_denoise.png) | ![](saved_imgs/cornell_UEmatball_100_nodenoise.png) |
+| 500 samples | ![](saved_imgs/cornell_UEmatball_500_denoise.png) | ![](saved_imgs/cornell_UEmatball_500_nodenoise.png) |
 
 ### Stylized Rendering - Cel-Shading
 
 #### Implementation
 
-Implementation
+For Cel-Shading, my implementation is quite easy - **REMOVE the COSINE ANGLE** for diffuse part, after that, as long as the the light is in front of the face, it will give the same amount of energy to them. I also add a angle clamp to make only the light&normal angle is smaller than some value then the light will count, since this can avoid some light shoot and hit itself at very grazing angles (in the original diffuse, cosine angle does this automatically).
+
+And after that, we should also change our BSDF importance sampling method from cosine-weighted sampling to uniform cone sampling to match the new BRDF.
 
 #### Results
 
-Results
+We can see the results that the light/dark boundry is sharpened after implementing this:
+
+|         With Cel-Shading          |           W/O Cel-Shading            |
+| :-------------------------------: | :----------------------------------: |
+| ![](saved_imgs/Castorice_Cel.png) | ![](saved_imgs/Castorice_NoToon.png) |
+
+Look at characters' nose, left arm and legs, those are the places most obvious.
 
 ### Stylized Rendering - Shadow Channel
 
 #### Implementation
 
-Implementation
+The shadow channel is used to ignore some shadow, which is very useful on characters' faces, because it can ignore the shadows of the noses and lips, make the faces clean. To achieve that, I wrote per-vertex data in Blender called `_SCHANNEL`, and read it from glTF exported to each vertices' `schannel`. In the intersection (both closest hit and any hit in directLight) stage, I check the ray's origin's `schannel` and the hit point's `schannel`, if they meet some requirements, then ignore this hit. And after each valid hit, I update the segment's `schannel` to the hit `schannel` for checking the next intersection.
+
+Currently the schannel _requirements_ are wrote fixed into the code, this will be better to load from .json files but time limits.
 
 #### Results
 
-Results
+The results are obvious, we can see some shadows on the faces are ignored:
+
+|            With Shadow Channel             |        W/O Shadow Channel         |
+| :----------------------------------------: | :-------------------------------: |
+| ![](saved_imgs/Castorice_Cel_SChannel.png) | ![](saved_imgs/Castorice_Cel.png) |
 
 ### Stylized Rendering - Line Rendering
 
 #### Implementation
 
-Implementation
+In my implementation of line rendering, I used back-facing methods to find edges. That's render an additional pass after GBuffer which cull's all front faces, and moves all vertices along the normal a little bit. To make the line always the same width, the shift is multiplied with linear depth from the camera.  
+Note that very importantly, we have to use another BVH which includes extended vertices to intersect with when using vertex shift, since the original BVH will cause us not intersect with some part.  
+After finding the edges, I treat them as light sources and find intersections in screen space in the real path-tracing stage, if hit then use that color as light color and terminate the ray.  
+To write the line color in glTF, I use Blender's export option to include them in material properties, so they can be read and load to use.
 
 #### Results
 
-Results
+We can see the results of line rendering very clearly, there are lines around the character's edges:
+
+|          With Line Rendering           |             W/O Line Rendering             |
+| :------------------------------------: | :----------------------------------------: |
+| ![](saved_imgs/Castorice_FullToon.png) | ![](saved_imgs/Castorice_Cel_SChannel.png) |
+
+### Stylized Rendering - Future Work
+
+Stylized Rendering still has many things to do. Easier things can be image layers, which enables us to render character's eyebrow and eyelash in front of their bangs, which is very common in anime games like Genshin, HSR and Wuwa. And some other features like anisotropic hair specular light (I don't know whether Disney BSDF's anisotropic param can do this, if so then I will say it's my loss to skip the implementation of this) and color ramp can be introduced.
+
+Then my implementation of line rendering has some limits since it is finding intersections in screen space, which is means some intersections cannot be found especially with DOF, and I did't taken lines after 1 bounce into account which means lines in reflections are not rendered. To do more about this, there is a paper by Rex West: http://cv.rexwe.st/pdf/pbflr.pdf. (In fact I tried some of his thoughts like detecting edges within a cone of rays and treating found edges as light sources, but my implementation is too poor makes the detected lines quality very low, so I turned to back-facing methods later)
+
+And the most difficult part, is to taken the whole stylized shading as a whole part and tried to maintain energy conserving about it, (now I'm doing all about tricks and those tricks will cause energy not conserving). To do more about this, there's also a paper by Rex West: http://cv.rexwe.st/pdf/srfoe.pdf
 
 ## Performance Features
 
@@ -332,8 +388,9 @@ A "sharp" sphere. That's because the barycentric coordinates is computed wrong (
 -   Disney BSDF, https://schuttejoe.github.io/post/disneybsdf/, https://cseweb.ucsd.edu/~tzli/cse272/wi2023/homework1.pdf
 -   CUDA Textures, https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TEXTURE__OBJECT.html
 -   ACES Curve, https://knarkowicz.wordpress.com/2016/01/06/aces-filmic-tone-mapping-curve/
--   Back-facing Line Render, https://x-wflo.github.io/2021/08/06/Cel-shading3/
 -   Blender glTF 2.0 export, https://docs.blender.org/manual/en/latest/addons/import_export/scene_gltf2.html
+-   Back-facing Line Render, https://x-wflo.github.io/2021/08/06/Cel-shading3/
+-   Physically-based Feature Line Rendering, Rex West, ACM Transactions on Graphics (SIGGRAPH Asia 2021), http://cv.rexwe.st/pdf/pbflr.pdf
 
 ### Libraries
 
