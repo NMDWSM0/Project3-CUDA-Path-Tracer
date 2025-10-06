@@ -1,0 +1,105 @@
+{
+    "Materials": {
+        "diffuse_white": {
+            "TYPE": "Diffuse",
+            "RGB": [0.98, 0.98, 0.98]
+        },
+        "diffuse_red": {
+            "TYPE": "Diffuse",
+            "RGB": [0.85, 0.35, 0.35]
+        },
+        "diffuse_green": {
+            "TYPE": "Diffuse",
+            "RGB": [0.35, 0.85, 0.35]
+        },
+        "specular_white": {
+            "TYPE": "Specular",
+            "RGB": [0.98, 0.98, 0.98],
+            "TRANSMISSION": 1.0,
+            "IOR": 1.5
+        },
+        "disney_white": {
+            "TYPE": "Disney",
+            "RGB": [1.0, 1.0, 1.0],
+            "ROUGHNESS": 0.001,
+            "METALLIC": 0.0,
+            "TRANSMISSION": 0.0,
+            "IOR": 1.5,
+            "CLEARCOAT": 0.0,
+            "CLEARCOAT_GLOSS": 0.0,
+            "SUBSURFACE": 0.0
+        }
+    },
+    "Camera": {
+        "RES": [800, 800],
+        "FOVY": 50.0,
+        "ITERATIONS": 1000,
+        "DEPTH": 10,
+        "FILE": "cornell_strange",
+        "EYE": [0.0, 5.0, 16],
+        "LOOKAT": [0.0, 5.0, 0.0],
+        "UP": [0.0, 1.0, 0.0],
+        "FOCALDISTANCE": 16,
+        "LENRADIUS": 0.0
+    },
+    "Lights": [
+        {
+            "TYPE": "rect",
+            "EMISSION": [10.0, 10.0, 10.0],
+            "POSITION": [-1.5, 9.85, -1.5],
+            "EDGE1": [3.0, 0.0, 0.0],
+            "EDGE2": [0.0, 0.0, 3.0]
+        }
+    ],
+    "Objects": [
+        {
+            "TYPE": "cube",
+            "MATERIAL": "diffuse_white",
+            "POSITION": [0.0, 0.0, 0.0],
+            "SIZE": [10.0, 0.01, 10.0]
+        },
+        {
+            "TYPE": "cube",
+            "MATERIAL": "diffuse_white",
+            "POSITION": [0.0, 10.0, 0.0],
+            "SIZE": [10.0, 0.01, 10.0]
+        },
+        {
+            "TYPE": "cube",
+            "MATERIAL": "diffuse_white",
+            "POSITION": [0.0, 5.0, -5.0],
+            "SIZE": [10.0, 10.0, 0.01]
+        },
+        {
+            "TYPE": "cube",
+            "MATERIAL": "diffuse_red",
+            "POSITION": [-5.0, 5.0, 0.0],
+            "SIZE": [0.01, 10.0, 10.0]
+        },
+        {
+            "TYPE": "cube",
+            "MATERIAL": "diffuse_green",
+            "POSITION": [5.0, 5.0, 0.0],
+            "SIZE": [0.01, 10.0, 10.0]
+        },
+        {
+            "TYPE": "gltf",
+            "PATH": "./strange.glb",
+            "SCALE": [2.0, 2.0, 2.0],
+            "ROTAT": [0.0, 0.0, 0.0],
+            "TRANS": [3.0, 3.0, 3.0]
+        }
+    ],
+    "Postprocess": {
+        "VIEWTRANSFORM": "ACES",
+        "EXPOSURE": 0.0,
+        "TEMPERATURE": 0.0,
+        "TINT": 0,
+        "SATURATION": 0.0,
+        "VIBRANCE": 0.0,
+        "CONTRAST": 0.0,
+        "CDLSLOPE": [1.0, 1.0, 1.0],
+        "CDLOFFSET": [0.0, 0.0, 0.0],
+        "CDLPOWER": [1.0, 1.0, 1.0]
+    }
+}

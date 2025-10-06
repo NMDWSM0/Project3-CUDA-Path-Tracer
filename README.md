@@ -132,7 +132,7 @@ MIS can create better images with same samples, or create image of same quality 
 
 |                       With MIS                       |                        W/O MIS                         |
 | :--------------------------------------------------: | :----------------------------------------------------: |
-| ![](saved_imgs/cornell_UEmatball_MIS_500samples.png) | ![](saved_imgs/cornell_UEmatball_NOMIS_500samples.png) |
+| ![](saved_imgs/cornell_UEmatball_MIS_500samples.png) | ![](saved_imgs/cornell_UEmatball_noMIS_500samples.png) |
 
 And there's also a very classic scene to show the function of MIS: veach scene. So we also include that:
 
