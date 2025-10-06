@@ -459,10 +459,12 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
 #if !PT_DOF
         apertureR = 0.f;
 #endif // !PT_DOF
+        float offsetX = 0.5f;
+        float offsetY = 0.5f;
 #if PT_AA
         // antialiasing by jittering the ray
-        float offsetX = u01(rng);
-        float offsetY = u01(rng);
+        offsetX = u01(rng);
+        offsetY = u01(rng);
 #endif // PT_AA
         float xn = ((float)(x + offsetX) / cam.resolution.x) * 2.f - 1.f;
         float yn = ((float)(y + offsetY) / cam.resolution.y) * 2.f - 1.f;

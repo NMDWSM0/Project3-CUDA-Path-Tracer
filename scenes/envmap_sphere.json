@@ -1,0 +1,61 @@
+{
+    "Materials": {
+        "diffuse_white": {
+            "TYPE": "Diffuse",
+            "RGB": [0.98, 0.98, 0.98]
+        },
+        "disney_white": {
+            "TYPE": "Disney",
+            "RGB": [0.98, 0.98, 0.98],
+            "ROUGHNESS": 1.0,
+            "METALLIC": 0.0,
+            "TRANSMISSION": 0.0,
+            "IOR": 1.5,
+            "CLEARCOAT": 0.0,
+            "CLEARCOAT_GLOSS": 0.0,
+            "SUBSURFACE": 0.0,
+            "TOON": false
+        }
+    },
+    "Camera": {
+        "RES": [800, 800],
+        "FOVY": 50.0,
+        "ITERATIONS": 5000,
+        "DEPTH": 10,
+        "FILE": "envmap_UEmatball",
+        "EYE": [0.0, 5.0, 16],
+        "LOOKAT": [0.0, 5.0, 0.0],
+        "UP": [0.0, 1.0, 0.0],
+        "FOCALDISTANCE": 16,
+        "LENRADIUS": 0.0
+    },
+    "EnvMap": {
+        "PATH": "./14-Hamarikyu_Bridge_B_3k.hdr"
+    },
+    "Objects": [
+        {
+            "TYPE": "cube",
+            "MATERIAL": "diffuse_white",
+            "POSITION": [0.0, 0.0, 0.0],
+            "SIZE": [40.0, 0.01, 40.0]
+        },
+        {
+            "TYPE": "sphere",
+            "MATERIAL": "disney_white",
+            "POSITION": [-1.0, 4.0, -1.0],
+            "RADIUS": 1.5
+        }
+    ],
+    "Postprocess": {
+        "VIEWTRANSFORM": "ACES",
+        "EXPOSURE": 0,
+        "TEMPERATURE": 0,
+        "TINT": 0,
+        "SATURATION": 0,
+        "VIBRANCE": 0.0,
+        "CONTRAST": 0.0,
+        "CDLSLOPE": [1.0, 1.0, 1.0],
+        "CDLOFFSET": [0.0, 0.0, 0.0],
+        "CDLPOWER": [1.0, 1.0, 1.0]
+    }
+}

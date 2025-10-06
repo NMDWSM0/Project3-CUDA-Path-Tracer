@@ -1,0 +1,22 @@
+{
+    "Camera": {
+        "RES": [800, 800],
+        "FOVY": 60.0,
+        "ITERATIONS": 4096,
+        "DEPTH": 10,
+        "FILE": "cornell_blender_tricount_test",
+        "EYE": [0.0, 5.0, 17.0],
+        "LOOKAT": [0.0, 5.0, 0.0],
+        "UP": [0.0, 1.0, 0.0],
+        "FOCALDISTANCE": 16.8,
+        "LENRADIUS": 0.0
+    },
+    "Objects": [
+        {
+            "TYPE": "gltf",
+            "PATH": "./cornell_blender_tricount_test.glb",
+            "OVERRIDE_CAMERA": true,
+            "LOAD_LIGHT": true
+        }
+    ]
+}

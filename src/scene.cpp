@@ -340,7 +340,7 @@ static void loadMeshes(Scene* scene, tinygltf::Model& gltfModel)
     }
 }
 
-static void loadMeshInstances(Scene* scene, const std::vector<MeshInstance>& instances) {
+static void loadMeshInstances(Scene* scene, const std::vector<MeshInstance>& instances, int overridematIndex) {
     for (auto& instance : instances) {
         glm::mat4 positionTransform = instance.world;
         glm::mat3 normalTransform = glm::inverseTranspose(glm::mat3(positionTransform));
@@ -356,7 +356,12 @@ static void loadMeshInstances(Scene* scene, const std::vector<MeshInstance>& ins
 			for (int tid = 0; tid * 3 < prim.indices.size(); ++tid) {
 				Geom newGeom(TRIANGLE);
 				newGeom.vertIds = glm::ivec3(prim.indices[3 * tid], prim.indices[3 * tid + 1], prim.indices[3 * tid + 2]) + glm::ivec3(vertBase);
-				newGeom.materialid = sceneMatIdx;
+                if (overridematIndex >= 0) {
+                    newGeom.materialid = overridematIndex;
+                }
+                else {
+                    newGeom.materialid = sceneMatIdx;
+                }
 				scene->geoms.push_back(newGeom);
 			}
 
@@ -633,7 +638,7 @@ void loadLights(Scene* scene, tinygltf::Model& gltfModel, const std::vector<Ligh
     }
 }
 
-void Scene::loadFromGLTF(const std::string& fileName, const glm::mat4& inputTransform, bool loadCam, bool loadLgt)
+void Scene::loadFromGLTF(const std::string& fileName, const glm::mat4& inputTransform, bool loadCam, bool loadLgt, int overridematIndex)
 {
     std::string ext = fileName.substr(fileName.find_last_of(".") + 1);
 
@@ -663,7 +668,7 @@ void Scene::loadFromGLTF(const std::string& fileName, const glm::mat4& inputTran
 
     MeshPrims.clear(); // clear meshes, prevent reading previous mesh idx from other gltf files
     loadMeshes(this, model);
-    loadMeshInstances(this, meshinstances);
+    loadMeshInstances(this, meshinstances, overridematIndex);
 
     std::vector<bool> isNormal;
     isNormal.resize(model.textures.size());
@@ -947,11 +952,17 @@ void Scene::loadFromJSON(const std::string& jsonName)
                 const auto& scale = p["SCALE"];
                 scalevec = glm::vec3(scale[0], scale[1], scale[2]);
             }
+
+            int overridematIndex = -1;
+            if (p.contains("OVERRIDE_MATERIAL")) {
+                overridematIndex = MatNameToID[p["OVERRIDE_MATERIAL"]];
+                assert(overridematIndex >= 0);
+            }
             
             glm::mat4 transform = utilityCore::buildTransformationMatrix(translation, rotation, scalevec);
             bool loadCam = p.value("OVERRIDE_CAMERA", false);
             bool loadLgt = p.value("LOAD_LIGHT", false);
-            loadFromGLTF(fullmeshpath, transform, loadCam, loadLgt);
+            loadFromGLTF(fullmeshpath, transform, loadCam, loadLgt, overridematIndex);
         }
     }
 
