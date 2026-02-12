@@ -23,7 +23,7 @@ __host__ __device__ float AABBIntersect(glm::vec3 minCorner, glm::vec3 maxCorner
     float t1 = glm::min(tmax.x, glm::min(tmax.y, tmax.z));
     float t0 = glm::max(tmin.x, glm::max(tmin.y, tmin.z));
 
-    return (t1 >= t0) ? (t0 > 0.f ? t0 : t1) : -1.0;
+    return (t1 >= t0 && t1 > 0) ? t0 : INFINITY;
 }
 
 __host__ __device__ float SphereIntersect(float rad, glm::vec3 pos, const Ray& r)
@@ -210,7 +210,7 @@ __host__ __device__ bool getAnyHit(
             leftHit = AABBIntersect(leftNode.bounds.pMin, leftNode.bounds.pMax, r);
             rightHit = AABBIntersect(rightNode.bounds.pMin, rightNode.bounds.pMax, r);
             // chech hit and distance
-            if (leftHit > 0.0 && rightHit > 0.0) {
+            if (leftHit < maxt && rightHit < maxt) {
                 int nextIndex;
                 if (leftHit > rightHit) {
                     bvhIdx = rightIndex;     // first go right
@@ -223,11 +223,11 @@ __host__ __device__ bool getAnyHit(
                 stack[ptr++] = nextIndex;
                 continue;
             }
-            else if (leftHit > 0.) {
+            else if (leftHit < maxt) {
                 bvhIdx = leftIndex;
                 continue;
             }
-            else if (rightHit > 0.) {
+            else if (rightHit < maxt) {
                 bvhIdx = rightIndex;
                 continue;
             }
@@ -439,11 +439,11 @@ __host__ __device__ bool getClosestHit(
             int rightIndex = curNode.secondChildOffset;
             LinearBVHNode& leftNode = bvhNodes[leftIndex];
             LinearBVHNode& rightNode = bvhNodes[rightIndex];
-            float leftHit = 0.0, rightHit = 0.0;
+            float leftHit, rightHit;
             leftHit = AABBIntersect(leftNode.bounds.pMin, leftNode.bounds.pMax, r);
             rightHit = AABBIntersect(rightNode.bounds.pMin, rightNode.bounds.pMax, r);
             // chech hit and distance
-            if (leftHit > 0.0 && rightHit > 0.0) {
+            if (leftHit < t && rightHit < t) {
                 int nextIndex;
                 if (leftHit > rightHit) {
                     bvhIdx = rightIndex;     // first go right
@@ -456,11 +456,11 @@ __host__ __device__ bool getClosestHit(
                 stack[ptr++] = nextIndex;
                 continue;
             }
-            else if (leftHit > 0.) {
+            else if (leftHit < t) {
                 bvhIdx = leftIndex;
                 continue;
             }
-            else if (rightHit > 0.) {
+            else if (rightHit < t) {
                 bvhIdx = rightIndex;
                 continue;
             }

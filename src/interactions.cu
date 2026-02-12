@@ -407,7 +407,7 @@ __host__ __device__ void Sample_f_Specular(
     const float VdotN = glm::dot(woW, normal);
     const float eta = VdotN > 0.f ? 1.f / m.ior : m.ior;
     const float F_wo = dielectricFresnel(abs(VdotN), eta);
-    float refractProb = m.transmission * (1.f - F_wo);
+    float refractProb = m.transmission * 0.5f;
 
     glm::vec3 wiW;
     bool refract = false;
@@ -420,10 +420,10 @@ __host__ __device__ void Sample_f_Specular(
     }
     // evaluate
     if (refract) {
-        pathSegment.throughput *= m.color * eta * eta;
+        pathSegment.throughput *= m.color * (1.f - F_wo) * m.transmission / refractProb;
     }
     else {
-        pathSegment.throughput *= m.color;
+        pathSegment.throughput *= m.color * (1.f - m.transmission + m.transmission * F_wo) / (1.f - refractProb);
     }
     pathSegment.pdf = INFINITY; // infinity
     pathSegment.ray = { intersect + wiW * EPSILON, wiW };
